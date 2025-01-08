@@ -1,3 +1,12 @@
+/* SinglePageDiagram.js */
+import React, { useEffect, useState } from 'react';
+import ReactDOM from 'react-dom';
+import mermaid from 'mermaid';
+
+// Initialize Mermaid once
+mermaid.initialize({ startOnLoad: false });
+
+// 1) Mock data
 const mockDiagramData = {
   models: {
     NetworkProcessing: {
@@ -150,10 +159,10 @@ const mockDiagramData = {
   },
   styling: {
     entityColors: {
-      payment: '#f0f9ff',    // Light blue for payment entities
-      merchant: '#f0fdf4',   // Light green for merchant entities
-      reference: '#fff1f2',  // Light red for reference data
-      routing: '#fdf4ff'     // Light purple for routing entities
+      payment: '#f0f9ff',
+      merchant: '#f0fdf4',
+      reference: '#fff1f2',
+      routing: '#fdf4ff'
     },
     relationshipStyles: {
       ForeignKey: 'solid',
@@ -162,26 +171,158 @@ const mockDiagramData = {
   }
 };
 
-// Helper function to convert to Mermaid format
+// 2) Helper function: convert entire data to a Mermaid "classDiagram" string
 function convertToMermaid(data) {
   let mermaidStr = 'classDiagram\n';
-  
+
   // Add classes with fields
   Object.entries(data.models).forEach(([modelName, model]) => {
     mermaidStr += `class ${modelName} {\n`;
-    model.fields.forEach(field => {
-      const fieldStr = field.isPrimary ? `+${field.name}* ${field.type}` : `+${field.name} ${field.type}`;
+    model.fields.forEach((field) => {
+      const fieldStr = field.isPrimary
+        ? `+${field.name}* ${field.type}`
+        : `+${field.name} ${field.type}`;
       mermaidStr += `    ${fieldStr}\n`;
     });
     mermaidStr += '}\n';
   });
-  
+
   // Add relationships
-  data.relationships.forEach(rel => {
+  data.relationships.forEach((rel) => {
     mermaidStr += `${rel.from} --> ${rel.to} : ${rel.field}\n`;
   });
-  
+
   return mermaidStr;
 }
 
-export default mockDiagramData;
+// 3) Component: Full Diagram of the entire payment system
+function PaymentSystemDiagram({ data }) {
+  const [diagramCode, setDiagramCode] = useState('');
+
+  useEffect(() => {
+    // Build the full diagram from data
+    const code = convertToMermaid(data);
+    setDiagramCode(code);
+  }, [data]);
+
+  useEffect(() => {
+    if (diagramCode) {
+      mermaid.contentLoaded();
+    }
+  }, [diagramCode]);
+
+  return (
+    <div>
+      <h2>Full Payment System Diagram</h2>
+      <div className="mermaid">{diagramCode}</div>
+    </div>
+  );
+}
+
+// 4) Component: SingleEntityDiagram (focus on one entity + direct relations)
+function SingleEntityDiagram({ data, entityName }) {
+  const [diagramCode, setDiagramCode] = useState('');
+
+  function buildEntityDiagram() {
+    if (!entityName) return 'classDiagram\nclass NoSelection { }';
+
+    const model = data.models[entityName];
+    if (!model) return `classDiagram\nclass Missing {}`;
+
+    let diagram = 'classDiagram\n';
+
+    // The main entity with its fields
+    diagram += `class ${entityName} {\n`;
+    model.fields.forEach((field) => {
+      const fieldStr = field.isPrimary
+        ? `+${field.name}* ${field.type}`
+        : `+${field.name} ${field.type}`;
+      diagram += `    ${fieldStr}\n`;
+    });
+    diagram += '}\n';
+
+    // Add relationships that touch this entity
+    data.relationships.forEach((rel) => {
+      if (rel.from === entityName || rel.to === entityName) {
+        // Add the other class if not in the diagram
+        const otherSide = rel.from === entityName ? rel.to : rel.from;
+        if (!diagram.includes(`class ${otherSide} `)) {
+          diagram += `class ${otherSide} {\n}\n`; // minimal definition
+        }
+        diagram += `${rel.from} --> ${rel.to} : ${rel.field}\n`;
+      }
+    });
+
+    return diagram;
+  }
+
+  useEffect(() => {
+    setDiagramCode(buildEntityDiagram());
+  }, [entityName, data]);
+
+  useEffect(() => {
+    if (diagramCode) {
+      mermaid.contentLoaded();
+    }
+  }, [diagramCode]);
+
+  if (!entityName) {
+    return <p>Please select an entity...</p>;
+  }
+
+  return (
+    <div style={{ marginTop: '1rem' }}>
+      <h2>{entityName} Diagram</h2>
+      <div className="mermaid">{diagramCode}</div>
+    </div>
+  );
+}
+
+// 5) Component: ModelList (list of all models + button to select)
+function ModelList({ models, onSelect }) {
+  return (
+    <div>
+      <h3>All Models</h3>
+      <ul>
+        {Object.keys(models).map((modelName) => (
+          <li key={modelName}>
+            <button onClick={() => onSelect(modelName)}>
+              {modelName}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// 6) Main App: combine the list, the full diagram, and single-entity diagram
+function App() {
+  const [selectedModel, setSelectedModel] = useState(null);
+
+  return (
+    <div style={{ display: 'flex', gap: '2rem', margin: '1rem' }}>
+      {/* Left side: list of all models */}
+      <div style={{ minWidth: '200px' }}>
+        <ModelList
+          models={mockDiagramData.models}
+          onSelect={(modelName) => setSelectedModel(modelName)}
+        />
+      </div>
+
+      {/* Right side: show the full system + optional single-entity diagram */}
+      <div style={{ flex: 1 }}>
+        <PaymentSystemDiagram data={mockDiagramData} />
+        {selectedModel && (
+          <SingleEntityDiagram
+            data={mockDiagramData}
+            entityName={selectedModel}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// 7) Render the entire thing to #root (no exports, just one file).
+ReactDOM.render(<App />, document.getElementById('root'));
