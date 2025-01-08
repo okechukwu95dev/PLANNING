@@ -2,6 +2,41 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
 import mermaid from 'mermaid';
+const sanitize = (name) => name.replace(/[^a-zA-Z0-9]/g, '_');
+const escape = (text) => text.replace(/[\[\]]/g, '\\$&');
+function buildEntityDiagram() {
+  if (!entityName) return 'classDiagram\nclass NoSelection { }';
+
+  const model = data.models[entityName];
+  if (!model) return 'classDiagram\nclass Missing {}';
+
+  let diagram = 'classDiagram\n';
+
+  // Add the main entity and its fields
+  diagram += `class ${sanitize(entityName)} {\n`;
+  model.fields.forEach((field) => {
+    const fieldStr = field.isPrimary
+      ? `+${escape(field.name)}* ${escape(field.type)}`
+      : `+${escape(field.name)} ${escape(field.type)}`;
+    diagram += `  ${fieldStr}\n`;
+  });
+  diagram += '}\n';
+
+  // Add relationships touching this entity
+  data.relationships.forEach((rel) => {
+    if (rel.from === entityName || rel.to === entityName) {
+      const from = sanitize(rel.from);
+      const to = sanitize(rel.to);
+      diagram += `${from} --> ${to} : ${escape(rel.field)}\n`;
+    }
+  });
+
+  return diagram;
+}
+
+// Helper functions
+const sanitize = (name) => name.replace(/[^a-zA-Z0-9]/g, '_');
+const escape = (text) => text.replace(/[\[\]]/g, '\\$&');
 
 // Initialize Mermaid once
 mermaid.initialize({ startOnLoad: false });
