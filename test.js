@@ -1,6 +1,7 @@
 import pandas as pd
 import json
 import logging
+import re
 
 # Configure logging
 logging.basicConfig(
@@ -18,136 +19,186 @@ def create_credit_exposure_configs(excel_file, output_file):
     logger.info(f"Starting to process Excel file: {excel_file}")
     
     try:
-        df = pd.read_excel(excel_file)
+        # Force string type for LE ID to prevent float conversion
+        df = pd.read_excel(excel_file, dtype={'LE ID': str, 'MOP Code': str})
         logger.info(f"Successfully loaded Excel file with {len(df)} rows")
     except Exception as e:
         logger.error(f"Failed to load Excel file: {str(e)}")
         return []
     
-    # Get funding configuration mappings
-    funding_config_mapping = {
-        ("Fund Hub", False): 1,  # Fund Hub + Settled
-        ("IT_settlement", False): 2,  # IT Settlement + Settled
-        ("IT Settlement", False): 2,  # IT Settlement + Settled
-        ("IT_Settlement", False): 2,  # IT Settlement + Settled
-        ("Fund Hub", True): 3,   # Fund Hub + Conveyed
-        ("conveyed", True): 3,   # Conveyed
-        ("Conveyed", True): 3,   # Conveyed
-    }
-    
     configs = []
     
     for idx, row in df.iterrows():
-        logger.info(f"Processing row {idx+2} (Excel row number)")
+        row_num = idx + 2  # Excel row number (1-based + header)
         
-        # Skip rows without data
-        if pd.isna(row.get('MOP Code')):
-            logger.warning(f"Skipping row {idx+2} - Missing MOP Code")
-            continue
-            
-        # Get MOP code and Legal Entity ID directly from columns
+        # Check for MOP Code - only required field
         mop_code = row.get('MOP Code')
-        legal_entity_id = row.get('LE ID')
-        
-        logger.info(f"Processing MOP: {mop_code}, Legal Entity ID: {legal_entity_id}")
-        
-        if not mop_code or pd.isna(legal_entity_id):
-            logger.warning(f"Skipping row {idx+2} - Invalid MOP Code or Legal Entity ID")
+        if pd.isna(mop_code):
+            logger.warning(f"Skipping row {row_num} - Missing MOP Code")
             continue
         
-        # Helper functions for data conversion
-        def parse_bool(val):
+        logger.info(f"Processing row {row_num}: MOP {mop_code}")
+        
+        # Get legal entity ID - keep as string without decimal
+        legal_entity_id = row.get('LE ID')
+        if pd.isna(legal_entity_id):
+            logger.warning(f"Row {row_num}: LE ID is null")
+            legal_entity_id = None
+        else:
+            # Remove any decimal part if it exists
+            legal_entity_id = str(legal_entity_id).split('.')[0]
+        
+        # Normalize all text fields by trimming whitespace and lowercasing for comparison
+        def normalize_cell(val):
             if pd.isna(val):
                 return None
-            if val == 'N/A' or val == 'n/a':
+            if not isinstance(val, str):
+                return str(val).lower()
+            return val.strip().lower()
+        
+        # Apply normalization to the entire row for consistent comparisons
+        normalized_row = {k: normalize_cell(v) for k, v in row.items()}
+        
+        # Determine conveyed status - check different column names and values with more aggressive matching
+        is_conveyed = False
+        
+        # Try all possible column names that might contain conveyed info
+        conveyed_columns = ['Settled/Conveyed MOP', 'Settled/Conveyed', 'Settled/Conveyed MOP', 'Conveyed']
+        
+        for col in conveyed_columns:
+            if col in row:
+                value = normalized_row.get(col)
+                if value and 'convey' in value:
+                    is_conveyed = True
+                    logger.info(f"Row {row_num}: Detected conveyed status from column {col} with value '{value}'")
+                    break
+        
+        # Extra check - look for 'conveyed' in any column value as a fallback
+        if not is_conveyed:
+            for col, value in normalized_row.items():
+                if value and isinstance(value, str) and 'convey' in value:
+                    is_conveyed = True
+                    logger.info(f"Row {row_num}: Detected conveyed status from column {col} with value '{value}'")
+                    break
+        
+        # Get funding config - handle both hardcoded values and derived values
+        funding_config_id = None
+        
+        # Check hardcoded values in the Funding Hub column
+        funding_hub_columns = ['Funding Hub Configuration', 'Funding Hub']
+        for col in funding_hub_columns:
+            if col in row and pd.notna(row[col]):
+                value = row[col]
+                if isinstance(value, (int, float)) and not pd.isna(value):
+                    # Direct integer value
+                    funding_config_id = int(value)
+                    logger.info(f"Row {row_num}: Found direct funding config ID {funding_config_id} in column {col}")
+                    break
+        
+        # If no hardcoded ID found, derive from Funding Hub value and conveyed status
+        if funding_config_id is None:
+            # Get funding hub value (normalized)
+            for col in funding_hub_columns:
+                if col in normalized_row and normalized_row[col]:
+                    funding_hub_value = normalized_row[col]
+                    
+                    if is_conveyed:
+                        # Any conveyed maps to ID 3
+                        funding_config_id = 3
+                        logger.info(f"Row {row_num}: Using funding config ID 3 (conveyed)")
+                    elif "fund hub" in funding_hub_value:
+                        funding_config_id = 1
+                        logger.info(f"Row {row_num}: Using funding config ID 1 (Fund Hub settled)")
+                    elif any(settlement in funding_hub_value for settlement in ["it_settlement", "it settlement", "it_settlement"]):
+                        funding_config_id = 2
+                        logger.info(f"Row {row_num}: Using funding config ID 2 (IT Settlement)")
+                    break
+        
+        # Create parsers for different data types with robust handling
+        def parse_bool(val):
+            if pd.isna(val) or val in ["n/a", "na", "null", "none", ""]:
                 return None
-            return val == 'Y'
+            if isinstance(val, bool):
+                return val
+            if isinstance(val, str):
+                val = val.strip().upper()
+                return val == 'Y' or val == 'YES' or val == 'TRUE'
+            return None
         
         def parse_number(val):
-            if pd.isna(val) or val == 'N/A' or val == 'n/a':
+            if pd.isna(val) or val in ["n/a", "na", "null", "none", ""]:
                 return None
             try:
+                if isinstance(val, str):
+                    # Extract digits from any string
+                    match = re.search(r'\d+', val.strip())
+                    if match:
+                        return int(match.group())
                 return int(val)
-            except:
+            except (ValueError, TypeError):
                 return None
         
-        # Create the config object with required fields
+        def parse_string(val):
+            if pd.isna(val) or val in ["n/a", "na", "null", "none", ""]:
+                return None
+            return str(val).strip()
+        
+        # Check multiple possible column names for settlement window
+        settlement_window = None
+        window_columns = [
+            'Settlement Window', 
+            'Settlement Window or Network funding',
+            'Settlement Network funding'
+        ]
+        
+        for col in window_columns:
+            if col in row and pd.notna(row[col]):
+                settlement_window = parse_number(row[col])
+                if settlement_window is not None:
+                    logger.info(f"Row {row_num}: Found settlement window {settlement_window} in column {col}")
+                    break
+        
+        # Create config with robust handling of all fields
         config = {
-            "methodOfPayment": mop_code,
-            "legalEntity": str(legal_entity_id)
+            "methodOfPayment": str(mop_code),
+            "legalEntity": legal_entity_id,
+            "fundingConfig": funding_config_id,
+            "settlementService": parse_string(row.get('Settlement Services(ISS/NSS)')),
+            "ndxDisputes": parse_bool(row.get('Non Delivery Disputes (NDX) applicable for MOP')),
+            "chargebackDisputes": parse_bool(row.get('Chargeback Disputes applicable on MOP')),
+            "settlementWindow": settlement_window,
+            "settlementWindowApplicableIndicator": parse_bool(row.get('Settlement Window Applicable Indicator')),
+            "riskReportableIndicator": parse_bool(row.get('Risk Reportable')),
+            "chargebackReportableIndicator": parse_bool(row.get('Chargeback Reportable')),
+            "salesReportableIndicator": parse_bool(row.get('Sales Reportable')),
+            "refundReportableIndicator": parse_bool(row.get('Refund Reportable')),
+            "salesExposureIndicator": True,
+            "refundExposureIndicator": True,
+            "chargebackExposureIndicator": True
         }
         
-        # Handle funding configuration
-        funding_hub_value = row.get('Funding Hub Configuration')
-        is_conveyed = (row.get('Settled/Conveyed') == "conveyed" or 
-                      row.get('Settled/Conveyed') == "Conveyed")
-        
-        # Look up the proper funding config ID based on combination
-        funding_config_key = (funding_hub_value, is_conveyed)
-        funding_config_id = funding_config_mapping.get(funding_config_key)
-        
-        if funding_config_id:
-            config["fundingConfig"] = funding_config_id
-            logger.info(f"Set fundingConfig to {funding_config_id} based on {funding_hub_value} and conveyed={is_conveyed}")
-        else:
-            config["fundingConfig"] = None
-            logger.warning(f"No funding config found for {funding_hub_value} and conveyed={is_conveyed}")
-        
-        # Handle settlement service if applicable
-        settlement_service_value = row.get('Settlement Services(ISS/NSS)')
-        if pd.notna(settlement_service_value) and settlement_service_value != "null":
-            config["settlementService"] = settlement_service_value
-            logger.info(f"Set settlementService to {settlement_service_value}")
-        else:
-            config["settlementService"] = None
-        
-        # Add boolean flags - now with null support
-        config["ndxDisputes"] = parse_bool(row.get('Non Delivery Disputes (NDX) applicable for MOP'))
-        config["chargebackDisputes"] = parse_bool(row.get('Chargeback Disputes applicable on MOP'))
-        
-        # Handle settlement window
-        settlement_window = parse_number(row.get('Settlement Window or Network funding'))
-        config["settlementWindow"] = settlement_window
-        if settlement_window is not None and settlement_window > 0:
-            logger.info(f"Set settlementWindow to {settlement_window}")
-        
-        config["settlementWindowApplicableIndicator"] = parse_bool(row.get('Settlement Window Applicable Indicator'))
-        
-        # Add reporting flags - now with null support
-        config["riskReportableIndicator"] = parse_bool(row.get('Risk Reportable'))
-        config["chargebackReportableIndicator"] = parse_bool(row.get('Chargeback Reportable'))
-        config["salesReportableIndicator"] = parse_bool(row.get('Sales Reportable'))
-        config["refundReportableIndicator"] = parse_bool(row.get('Refund Reportable'))
-        
-        # Add these based on model in the image - set default values
-        config["salesExposureIndicator"] = True
-        config["refundExposureIndicator"] = True
-        config["chargebackExposureIndicator"] = True
-        
-        logger.info(f"Completed processing for row {idx+2}")
+        logger.info(f"Created config for {mop_code}")
         configs.append(config)
     
     # Write to JSON file
     try:
         with open(output_file, 'w') as f:
             json.dump(configs, f, indent=2)
-            
         logger.info(f"Successfully wrote {len(configs)} configurations to {output_file}")
     except Exception as e:
         logger.error(f"Failed to write JSON file: {str(e)}")
     
     return configs
 
-# Example usage
 if __name__ == "__main__":
-    excel_file = "payment_methods.xlsx"  # Change to your file path
+    excel_file = "workbook.xlsx"  # Your file name
     output_file = "credit_exposure_configs.json"
     
     configs = create_credit_exposure_configs(excel_file, output_file)
     
     if configs:
-        print("\nSample Credit Exposure Configuration:")
-        print(json.dumps(configs[0], indent=2))
+        print(f"\nCreated {len(configs)} Credit Exposure Configurations.")
+        print(f"Check processing.log for detailed processing information.")
         
-    print(f"\nDone! Created {len(configs)} Credit Exposure Configurations.")
-    print(f"Check processing.log for detailed processing information.")
+        print("\nSample config:")
+        print(json.dumps(configs[0], indent=2))
