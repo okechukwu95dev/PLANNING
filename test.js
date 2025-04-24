@@ -1,363 +1,153 @@
-/* SinglePageDiagram.js */
-import React, { useEffect, useState } from 'react';
-import ReactDOM from 'react-dom';
-import mermaid from 'mermaid';
-const sanitize = (name) => name.replace(/[^a-zA-Z0-9]/g, '_');
-const escape = (text) => text.replace(/[\[\]]/g, '\\$&');
-function buildEntityDiagram() {
-  if (!entityName) return 'classDiagram\nclass NoSelection { }';
+import pandas as pd
+import json
+import logging
 
-  const model = data.models[entityName];
-  if (!model) return 'classDiagram\nclass Missing {}';
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("processing.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger()
 
-  let diagram = 'classDiagram\n';
-
-  // Add the main entity and its fields
-  diagram += `class ${sanitize(entityName)} {\n`;
-  model.fields.forEach((field) => {
-    const fieldStr = field.isPrimary
-      ? `+${escape(field.name)}* ${escape(field.type)}`
-      : `+${escape(field.name)} ${escape(field.type)}`;
-    diagram += `  ${fieldStr}\n`;
-  });
-  diagram += '}\n';
-
-  // Add relationships touching this entity
-  data.relationships.forEach((rel) => {
-    if (rel.from === entityName || rel.to === entityName) {
-      const from = sanitize(rel.from);
-      const to = sanitize(rel.to);
-      diagram += `${from} --> ${to} : ${escape(rel.field)}\n`;
+def create_credit_exposure_configs(excel_file, output_file):
+    """Create Credit Exposure Configuration JSON from Excel data"""
+    logger.info(f"Starting to process Excel file: {excel_file}")
+    
+    try:
+        df = pd.read_excel(excel_file)
+        logger.info(f"Successfully loaded Excel file with {len(df)} rows")
+    except Exception as e:
+        logger.error(f"Failed to load Excel file: {str(e)}")
+        return []
+    
+    # Get funding configuration mappings
+    funding_config_mapping = {
+        ("Fund Hub", False): 1,  # Fund Hub + Settled
+        ("IT_settlement", False): 2,  # IT Settlement + Settled
+        ("IT Settlement", False): 2,  # IT Settlement + Settled
+        ("IT_Settlement", False): 2,  # IT Settlement + Settled
+        ("Fund Hub", True): 3,   # Fund Hub + Conveyed
+        ("conveyed", True): 3,   # Conveyed
+        ("Conveyed", True): 3,   # Conveyed
     }
-  });
-
-  return diagram;
-}
-
-// Helper functions
-const sanitize = (name) => name.replace(/[^a-zA-Z0-9]/g, '_');
-const escape = (text) => text.replace(/[\[\]]/g, '\\$&');
-
-// Initialize Mermaid once
-mermaid.initialize({ startOnLoad: false });
-
-// 1) Mock data
-const mockDiagramData = {
-  models: {
-    NetworkProcessing: {
-      fields: [
-        { name: 'id', type: 'BigAutoField', isPrimary: true },
-        { name: 'primaryId', type: 'CharField(16)' },
-        { name: 'secondaryId', type: 'CharField(16)' },
-        { name: 'country', type: 'ForeignKey', references: 'Country', onDelete: 'CASCADE' },
-        { name: 'clearingId', type: 'CharField(16)' },
-        { name: 'authorisationId', type: 'CharField(16)' },
-        { name: 'networkEndpoint', type: 'CharField(16)' },
-        { name: 'description', type: 'CharField(50)' }
-      ]
-    },
-    PaymentAdapter: {
-      fields: [
-        { name: 'id', type: 'BigAutoField', isPrimary: true },
-        { name: 'name', type: 'CharField(100)' }
-      ]
-    },
-    FundingConfiguration: {
-      fields: [
-        { name: 'id', type: 'BigAutoField', isPrimary: true },
-        { name: 'description', type: 'CharField(100)' },
-        { name: 'settlementPlatform', type: 'CharField(100)' },
-        { name: 'conveyed', type: 'BooleanField' }
-      ]
-    },
-    MethodOfPaymentEndpointConfiguration: {
-      fields: [
-        { name: 'id', type: 'BigAutoField', isPrimary: true },
-        { name: 'alias', type: 'CharField(200)' },
-        { name: 'isDefault', type: 'BooleanField' },
-        { name: 'transactionChannel', type: 'CharField' },
-        { name: 'fundingConfig', type: 'ForeignKey', references: 'FundingConfiguration' }
-      ]
-    },
-    NetworkConfiguration: {
-      fields: [
-        { name: 'id', type: 'BigAutoField', isPrimary: true },
-        { name: 'legalEntity', type: 'ForeignKey', references: 'LegalEntity' },
-        { name: 'methodOfPayment', type: 'ForeignKey', references: 'MethodOfPayment' },
-        { name: 'networkProcessing', type: 'ForeignKey', references: 'NetworkProcessing' }
-      ]
-    },
-    MerchantCapability: {
-      fields: [
-        { name: 'code', type: 'CharField(4)', isPrimary: true },
-        { name: 'description', type: 'CharField(50)' }
-      ]
-    },
-    MerchantStatus: {
-      fields: [
-        { name: 'code', type: 'CharField(4)', isPrimary: true },
-        { name: 'description', type: 'CharField(50)' }
-      ]
-    },
-    MerchantStatusCapability: {
-      fields: [
-        { name: 'id', type: 'BigAutoField', isPrimary: true },
-        { name: 'merchantCapabilityCode', type: 'ForeignKey', references: 'MerchantCapability' },
-        { name: 'merchantStatusCode', type: 'ForeignKey', references: 'MerchantStatus' },
-        { name: 'allowed', type: 'BooleanField' }
-      ]
-    },
-    NaicsIndustryClassification: {
-      fields: [
-        { name: 'naicsCode', type: 'CharField(6)', isPrimary: true },
-        { name: 'naicsDescription', type: 'CharField(200)' }
-      ]
-    },
-    MerchantCategoryCode: {
-      fields: [
-        { name: 'merchantCategoryCode', type: 'CharField(4)', isPrimary: true },
-        { name: 'merchantCategoryName', type: 'CharField(200)' }
-      ]
-    },
-    MerchantCategoryCodeMapping: {
-      fields: [
-        { name: 'id', type: 'BigAutoField', isPrimary: true },
-        { name: 'merchantCategoryCode', type: 'ForeignKey', references: 'MerchantCategoryCode' },
-        { name: 'naicsCode', type: 'ForeignKey', references: 'NaicsIndustryClassification' }
-      ]
-    },
-    Rates: {
-      fields: [
-        { name: 'id', type: 'BigAutoField', isPrimary: true },
-        { name: 'chargebackRate', type: 'DecimalField' },
-        { name: 'refundRate', type: 'DecimalField' },
-        { name: 'ndc', type: 'PositiveIntegerField' },
-        { name: 'country', type: 'ForeignKey', references: 'Country' },
-        { name: 'merchantCategoryCode', type: 'ForeignKey', references: 'MerchantCategoryCode' }
-      ]
-    },
-    Country: {
-      fields: [
-        { name: 'numericCode', type: 'CharField(4)', isPrimary: true },
-        { name: 'name', type: 'CharField(100)' },
-        { name: 'officialName', type: 'CharField' },
-        { name: 'alphaCode', type: 'CharField' },
-        { name: 'threeLphaCode', type: 'CharField' }
-      ]
-    },
-    Currency: {
-      fields: [
-        { name: 'numericCode', type: 'CharField', isPrimary: true },
-        { name: 'name', type: 'CharField(100)' },
-        { name: 'alphaCode', type: 'CharField' },
-        { name: 'numberOfDecimals', type: 'PositiveIntegerField' }
-      ]
-    },
-    MethodOfPaymentRouting: {
-      fields: [
-        { name: 'id', type: 'BigAutoField', isPrimary: true },
-        { name: 'routingId', type: 'CharField(20)' },
-        { name: 'methodOfPayment', type: 'ForeignKey', references: 'MethodOfPayment' }
-      ]
-    },
-    LegalEntity: {
-      fields: [
-        { name: 'id', type: 'BigAutoField', isPrimary: true },
-        { name: 'name', type: 'CharField(200)' }
-      ]
-    },
-    MethodOfPayment: {
-      fields: [
-        { name: 'code', type: 'CharField(5)', isPrimary: true },
-        { name: 'name', type: 'CharField(100)' }
-      ]
-    }
-  },
-  relationships: [
-    { from: 'NetworkProcessing', to: 'Country', type: 'ForeignKey', field: 'country' },
-    { from: 'NetworkConfiguration', to: 'LegalEntity', type: 'ForeignKey', field: 'legalEntity' },
-    { from: 'NetworkConfiguration', to: 'MethodOfPayment', type: 'ForeignKey', field: 'methodOfPayment' },
-    { from: 'NetworkConfiguration', to: 'NetworkProcessing', type: 'ForeignKey', field: 'networkProcessing' },
-    { from: 'MethodOfPaymentEndpointConfiguration', to: 'FundingConfiguration', type: 'ForeignKey', field: 'fundingConfig' },
-    { from: 'MerchantStatusCapability', to: 'MerchantCapability', type: 'ForeignKey', field: 'merchantCapabilityCode' },
-    { from: 'MerchantStatusCapability', to: 'MerchantStatus', type: 'ForeignKey', field: 'merchantStatusCode' },
-    { from: 'MerchantCategoryCodeMapping', to: 'MerchantCategoryCode', type: 'ForeignKey', field: 'merchantCategoryCode' },
-    { from: 'MerchantCategoryCodeMapping', to: 'NaicsIndustryClassification', type: 'ForeignKey', field: 'naicsCode' },
-    { from: 'Rates', to: 'Country', type: 'ForeignKey', field: 'country' },
-    { from: 'Rates', to: 'MerchantCategoryCode', type: 'ForeignKey', field: 'merchantCategoryCode' },
-    { from: 'MethodOfPaymentRouting', to: 'MethodOfPayment', type: 'ForeignKey', field: 'methodOfPayment' }
-  ],
-  metadata: {
-    title: 'Payment System Complete Model Diagram',
-    description: 'All payment system entities and their relationships',
-    app_label: 'payments'
-  },
-  styling: {
-    entityColors: {
-      payment: '#f0f9ff',
-      merchant: '#f0fdf4',
-      reference: '#fff1f2',
-      routing: '#fdf4ff'
-    },
-    relationshipStyles: {
-      ForeignKey: 'solid',
-      ManyToMany: 'dashed'
-    }
-  }
-};
-
-// 2) Helper function: convert entire data to a Mermaid "classDiagram" string
-function convertToMermaid(data) {
-  let mermaidStr = 'classDiagram\n';
-
-  // Add classes with fields
-  Object.entries(data.models).forEach(([modelName, model]) => {
-    mermaidStr += `class ${modelName} {\n`;
-    model.fields.forEach((field) => {
-      const fieldStr = field.isPrimary
-        ? `+${field.name}* ${field.type}`
-        : `+${field.name} ${field.type}`;
-      mermaidStr += `    ${fieldStr}\n`;
-    });
-    mermaidStr += '}\n';
-  });
-
-  // Add relationships
-  data.relationships.forEach((rel) => {
-    mermaidStr += `${rel.from} --> ${rel.to} : ${rel.field}\n`;
-  });
-
-  return mermaidStr;
-}
-
-// 3) Component: Full Diagram of the entire payment system
-function PaymentSystemDiagram({ data }) {
-  const [diagramCode, setDiagramCode] = useState('');
-
-  useEffect(() => {
-    // Build the full diagram from data
-    const code = convertToMermaid(data);
-    setDiagramCode(code);
-  }, [data]);
-
-  useEffect(() => {
-    if (diagramCode) {
-      mermaid.contentLoaded();
-    }
-  }, [diagramCode]);
-
-  return (
-    <div>
-      <h2>Full Payment System Diagram</h2>
-      <div className="mermaid">{diagramCode}</div>
-    </div>
-  );
-}
-
-// 4) Component: SingleEntityDiagram (focus on one entity + direct relations)
-function SingleEntityDiagram({ data, entityName }) {
-  const [diagramCode, setDiagramCode] = useState('');
-
-  function buildEntityDiagram() {
-    if (!entityName) return 'classDiagram\nclass NoSelection { }';
-
-    const model = data.models[entityName];
-    if (!model) return `classDiagram\nclass Missing {}`;
-
-    let diagram = 'classDiagram\n';
-
-    // The main entity with its fields
-    diagram += `class ${entityName} {\n`;
-    model.fields.forEach((field) => {
-      const fieldStr = field.isPrimary
-        ? `+${field.name}* ${field.type}`
-        : `+${field.name} ${field.type}`;
-      diagram += `    ${fieldStr}\n`;
-    });
-    diagram += '}\n';
-
-    // Add relationships that touch this entity
-    data.relationships.forEach((rel) => {
-      if (rel.from === entityName || rel.to === entityName) {
-        // Add the other class if not in the diagram
-        const otherSide = rel.from === entityName ? rel.to : rel.from;
-        if (!diagram.includes(`class ${otherSide} `)) {
-          diagram += `class ${otherSide} {\n}\n`; // minimal definition
+    
+    configs = []
+    
+    for idx, row in df.iterrows():
+        logger.info(f"Processing row {idx+2} (Excel row number)")
+        
+        # Skip rows without data
+        if pd.isna(row.get('MOP Code')):
+            logger.warning(f"Skipping row {idx+2} - Missing MOP Code")
+            continue
+            
+        # Get MOP code and Legal Entity ID directly from columns
+        mop_code = row.get('MOP Code')
+        legal_entity_id = row.get('LE ID')
+        
+        logger.info(f"Processing MOP: {mop_code}, Legal Entity ID: {legal_entity_id}")
+        
+        if not mop_code or pd.isna(legal_entity_id):
+            logger.warning(f"Skipping row {idx+2} - Invalid MOP Code or Legal Entity ID")
+            continue
+        
+        # Helper functions for data conversion
+        def parse_bool(val):
+            if pd.isna(val):
+                return None
+            if val == 'N/A' or val == 'n/a':
+                return None
+            return val == 'Y'
+        
+        def parse_number(val):
+            if pd.isna(val) or val == 'N/A' or val == 'n/a':
+                return None
+            try:
+                return int(val)
+            except:
+                return None
+        
+        # Create the config object with required fields
+        config = {
+            "methodOfPayment": mop_code,
+            "legalEntity": str(legal_entity_id)
         }
-        diagram += `${rel.from} --> ${rel.to} : ${rel.field}\n`;
-      }
-    });
+        
+        # Handle funding configuration
+        funding_hub_value = row.get('Funding Hub Configuration')
+        is_conveyed = (row.get('Settled/Conveyed') == "conveyed" or 
+                      row.get('Settled/Conveyed') == "Conveyed")
+        
+        # Look up the proper funding config ID based on combination
+        funding_config_key = (funding_hub_value, is_conveyed)
+        funding_config_id = funding_config_mapping.get(funding_config_key)
+        
+        if funding_config_id:
+            config["fundingConfig"] = funding_config_id
+            logger.info(f"Set fundingConfig to {funding_config_id} based on {funding_hub_value} and conveyed={is_conveyed}")
+        else:
+            config["fundingConfig"] = None
+            logger.warning(f"No funding config found for {funding_hub_value} and conveyed={is_conveyed}")
+        
+        # Handle settlement service if applicable
+        settlement_service_value = row.get('Settlement Services(ISS/NSS)')
+        if pd.notna(settlement_service_value) and settlement_service_value != "null":
+            config["settlementService"] = settlement_service_value
+            logger.info(f"Set settlementService to {settlement_service_value}")
+        else:
+            config["settlementService"] = None
+        
+        # Add boolean flags - now with null support
+        config["ndxDisputes"] = parse_bool(row.get('Non Delivery Disputes (NDX) applicable for MOP'))
+        config["chargebackDisputes"] = parse_bool(row.get('Chargeback Disputes applicable on MOP'))
+        
+        # Handle settlement window
+        settlement_window = parse_number(row.get('Settlement Window or Network funding'))
+        config["settlementWindow"] = settlement_window
+        if settlement_window is not None and settlement_window > 0:
+            logger.info(f"Set settlementWindow to {settlement_window}")
+        
+        config["settlementWindowApplicableIndicator"] = parse_bool(row.get('Settlement Window Applicable Indicator'))
+        
+        # Add reporting flags - now with null support
+        config["riskReportableIndicator"] = parse_bool(row.get('Risk Reportable'))
+        config["chargebackReportableIndicator"] = parse_bool(row.get('Chargeback Reportable'))
+        config["salesReportableIndicator"] = parse_bool(row.get('Sales Reportable'))
+        config["refundReportableIndicator"] = parse_bool(row.get('Refund Reportable'))
+        
+        # Add these based on model in the image - set default values
+        config["salesExposureIndicator"] = True
+        config["refundExposureIndicator"] = True
+        config["chargebackExposureIndicator"] = True
+        
+        logger.info(f"Completed processing for row {idx+2}")
+        configs.append(config)
+    
+    # Write to JSON file
+    try:
+        with open(output_file, 'w') as f:
+            json.dump(configs, f, indent=2)
+            
+        logger.info(f"Successfully wrote {len(configs)} configurations to {output_file}")
+    except Exception as e:
+        logger.error(f"Failed to write JSON file: {str(e)}")
+    
+    return configs
 
-    return diagram;
-  }
-
-  useEffect(() => {
-    setDiagramCode(buildEntityDiagram());
-  }, [entityName, data]);
-
-  useEffect(() => {
-    if (diagramCode) {
-      mermaid.contentLoaded();
-    }
-  }, [diagramCode]);
-
-  if (!entityName) {
-    return <p>Please select an entity...</p>;
-  }
-
-  return (
-    <div style={{ marginTop: '1rem' }}>
-      <h2>{entityName} Diagram</h2>
-      <div className="mermaid">{diagramCode}</div>
-    </div>
-  );
-}
-
-// 5) Component: ModelList (list of all models + button to select)
-function ModelList({ models, onSelect }) {
-  return (
-    <div>
-      <h3>All Models</h3>
-      <ul>
-        {Object.keys(models).map((modelName) => (
-          <li key={modelName}>
-            <button onClick={() => onSelect(modelName)}>
-              {modelName}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-// 6) Main App: combine the list, the full diagram, and single-entity diagram
-function App() {
-  const [selectedModel, setSelectedModel] = useState(null);
-
-  return (
-    <div style={{ display: 'flex', gap: '2rem', margin: '1rem' }}>
-      {/* Left side: list of all models */}
-      <div style={{ minWidth: '200px' }}>
-        <ModelList
-          models={mockDiagramData.models}
-          onSelect={(modelName) => setSelectedModel(modelName)}
-        />
-      </div>
-
-      {/* Right side: show the full system + optional single-entity diagram */}
-      <div style={{ flex: 1 }}>
-        <PaymentSystemDiagram data={mockDiagramData} />
-        {selectedModel && (
-          <SingleEntityDiagram
-            data={mockDiagramData}
-            entityName={selectedModel}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// 7) Render the entire thing to #root (no exports, just one file).
-ReactDOM.render(<App />, document.getElementById('root'));
+# Example usage
+if __name__ == "__main__":
+    excel_file = "payment_methods.xlsx"  # Change to your file path
+    output_file = "credit_exposure_configs.json"
+    
+    configs = create_credit_exposure_configs(excel_file, output_file)
+    
+    if configs:
+        print("\nSample Credit Exposure Configuration:")
+        print(json.dumps(configs[0], indent=2))
+        
+    print(f"\nDone! Created {len(configs)} Credit Exposure Configurations.")
+    print(f"Check processing.log for detailed processing information.")
