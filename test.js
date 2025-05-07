@@ -17,8 +17,13 @@
       flex-direction: column;
     }
     
+    .chase-color {
+      background-color: #155c93;
+      color: white;
+    }
+    
     header {
-      background-color: #0078FF;
+      background-color: #155c93;
       color: white;
       padding: 16px;
       display: flex;
@@ -64,7 +69,7 @@
       transform: translateX(-50%);
       width: 100px;
       height: 4px;
-      background: linear-gradient(90deg, #0078FF, #155c93);
+      background: linear-gradient(90deg, #155c93, #155c93);
       border-radius: 2px;
     }
     
@@ -144,20 +149,21 @@
     }
     
     .card-button {
-      background-color: #0078FF;
+      background-color: #155c93;
       color: white;
       border: none;
-      border-radius: 6px;
-      padding: 12px 25px;
+      border-radius: 5px;
+      padding: 20px;
       font-size: 1rem;
       cursor: pointer;
       transition: background-color 0.2s;
       font-weight: 600;
       margin-top: auto;
+      text-align: center;
     }
     
     .card-button:hover {
-      background-color: #0056b3;
+      background-color: #0e4878;
     }
     
     .background-shapes {
@@ -288,7 +294,7 @@
           </div>
           <h3>Blueprints</h3>
           <p>Access and manage data architectural templates, models, and implementation frameworks.</p>
-          <button class="card-button">View Blueprints</button>
+          <a href="/blueprints" class="card-button chase-color">Blueprints</a>
         </div>
         
         <div class="card">
@@ -301,7 +307,7 @@
           </div>
           <h3>Service Codes</h3>
           <p>Browse and implement standardized service codes for integrating data services across platforms.</p>
-          <button class="card-button">View Service Codes</button>
+          <a href="/service-codes" class="card-button chase-color">Service Codes</a>
         </div>
       </div>
     </div>
