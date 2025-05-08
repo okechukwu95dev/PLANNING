@@ -39,6 +39,11 @@
   <single-spa-router>
     <main>
       <route default>
+        <header>
+          <div class="logo-container">
+            <h3><img src="logo.png" alt="Site Icon" class="logo">JPMorgan Chase</h3>
+          </div>
+        </header>
         <div class="content-container">
           <h1>Platform Data Homepage</h1>
           <div class="platform-info">
