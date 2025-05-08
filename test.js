@@ -1,1 +1,5 @@
->Platform Data provides centralized non-merchant data management for acquiring and payment platforms. It ensures accurate merchant qualification, pricing rules, and transaction charging by unifying data ingestion, storage, and distribution through reusable APIs and services.
+  <header>
+          <div class="logo-container">
+            <h3><img src="logo.png" alt="Site Icon" class="logo">JPMorgan Chase</h3>
+          </div>
+        </header>
