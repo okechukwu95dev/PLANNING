@@ -23,3 +23,11 @@
 @media (max-width: 768px) { .platform-data-default-route .cards-container { flex-direction: column; align-items: center; } .platform-data-default-route .card { width: 100%; max-width: 320px; } }
 @media (min-width: 1200px) { .platform-data-default-route .cards-container { gap: 60px; } }
 
+<div class="card-icon">
+  <svg width="60" height="60" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="30" cy="30" r="30" fill="#e3f2fd"/>
+    <path d="M18 15h24v30H18z" fill="none" stroke="#0078FF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M30 15v30" fill="none" stroke="#0078FF" stroke-width="4" stroke-linecap="round"/>
+  </svg>
+</div>
+
