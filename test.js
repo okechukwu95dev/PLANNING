@@ -31,3 +31,13 @@
   </svg>
 </div>
 
+
+.platform-data-default-route {
+  box-sizing: border-box;
+  width: 100vw;
+  min-height: 100vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(135deg,#e0f7fa 0%,#bbdefb 50%,#90caf9 100%);
+}
