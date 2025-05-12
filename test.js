@@ -57,3 +57,38 @@ application[name="@platformdata/service-codes-ui"] {
   display: block;
   margin: 8px;  /* Force default margin on route pages */
 }
+
+
+
+latets 
+
+
+<!-- index.ejs -->
+<head>
+  …  
+  <script>
+    function loadDefaultStyles() {
+      const isDefault = location.pathname === '/' || location.pathname === '';
+      if (isDefault && !document.getElementById('default-route-css')) {
+        const link = document.createElement('link');
+        link.id = 'default-route-css';
+        link.rel = 'stylesheet';
+        link.href = '/static/microfrontend-layout2.css';
+        document.head.appendChild(link);
+      }
+      if (!isDefault) {
+        const existing = document.getElementById('default-route-css');
+        existing && existing.remove();
+      }
+    }
+
+    // load now
+    loadDefaultStyles();
+
+    // reload on every Single-SPA navigation
+    window.addEventListener('single-spa:routing-event', loadDefaultStyles);
+  </script>
+  <script>
+    System.import('@platformdata/root-config');
+  </script>
+</head>
