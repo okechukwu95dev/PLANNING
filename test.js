@@ -41,3 +41,19 @@
   flex-direction: column;
   background: linear-gradient(135deg,#e0f7fa 0%,#bbdefb 50%,#90caf9 100%);
 }
+
+/* Add this to your CSS file */
+body {
+  margin: 8px;  /* Explicitly restore browser default margin */
+}
+
+.platform-data-default-route {
+  margin: 0;  /* Zero margin only on homepage container */
+}
+
+/* Add route-specific CSS */
+application[name="@platformdata/blueprints-ui"],
+application[name="@platformdata/service-codes-ui"] {
+  display: block;
+  margin: 8px;  /* Force default margin on route pages */
+}
