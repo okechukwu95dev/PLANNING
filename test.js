@@ -1,8 +1,7 @@
-import sqlite3
-import sys
+import sqlite3, sys
 
-db_path = sys.argv[1] if len(sys.argv) > 1 else "test.sqlite"
-conn = sqlite3.connect(db_path)
+db = sys.argv[1] if len(sys.argv)>1 else "test.sqlite"
+conn = sqlite3.connect(db)
 cur = conn.cursor()
 
 cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
@@ -10,15 +9,22 @@ tables = [r[0] for r in cur.fetchall()]
 
 for tbl in tables:
     print(f"TABLE: {tbl}")
+    # columns + PK flags
     cur.execute(f"PRAGMA table_info('{tbl}');")
-    for cid, name, ctype, notnull, dflt, pk in cur.fetchall():
+    for cid,name,ctype,notnull,dflt,pk in cur.fetchall():
         flags = []
         if notnull: flags.append("NOT NULL")
         if pk:     flags.append("PK")
         if dflt is not None: flags.append(f"DEFAULT={dflt}")
-        flagstr = f" [{' | '.join(flags)}]" if flags else ""
-        print(f"  - {name} ({ctype}){flagstr}")
+        print(f"  - {name} ({ctype}){' ['+' | '.join(flags)+']' if flags else ''}")
+    # foreign keys
+    cur.execute(f"PRAGMA foreign_key_list('{tbl}');")
+    for fk in cur.fetchall():
+        # fk tuple: (id,seq,table,from,to,on_update,on_delete,match)
+        _,_,ref_table,src_col,ref_col,_,_,_ = fk
+        print(f"    → FK: {src_col} → {ref_table}({ref_col})")
     print()
+
 
 
 <!DOCTYPE html>
