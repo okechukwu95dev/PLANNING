@@ -1,5 +1,4 @@
-python manage.py graph_models blueprints --pydot --group-models --inheritance --exclude-models "*Audit" "*Version" -o erd.dot
-
+python manage.py graph_models blueprints --pydot --group-models --inheritance --exclude-models "Audit*,Version*" -o erd.dot --settings src.main.config.settings_local
 
 # render PNG
 dot -Tpng erd.dot -o erd.png
