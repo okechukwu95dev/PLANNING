@@ -1,10 +1,5 @@
-# generate DOT for only your draft models (exclude audit/version)
-python manage.py graph_models blueprints \
-  --pydot \
-  --group-models \
-  --inheritance \
-  --exclude-models "*Audit" "*Version" \
-  -o erd.dot
+python manage.py graph_models blueprints --pydot --group-models --inheritance --exclude-models "*Audit" "*Version" -o erd.dot
+
 
 # render PNG
 dot -Tpng erd.dot -o erd.png
