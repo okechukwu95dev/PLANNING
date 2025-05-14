@@ -1,3 +1,15 @@
+# generate DOT for only your draft models (exclude audit/version)
+python manage.py graph_models blueprints \
+  --pydot \
+  --group-models \
+  --inheritance \
+  --exclude-models "*Audit" "*Version" \
+  -o erd.dot
+
+# render PNG
+dot -Tpng erd.dot -o erd.png
+
+
 import sqlite3, sys
 
 db = sys.argv[1] if len(sys.argv)>1 else "test.sqlite"
