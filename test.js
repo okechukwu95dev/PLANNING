@@ -1,3 +1,26 @@
+import sqlite3
+import sys
+
+db_path = sys.argv[1] if len(sys.argv) > 1 else "test.sqlite"
+conn = sqlite3.connect(db_path)
+cur = conn.cursor()
+
+cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+tables = [r[0] for r in cur.fetchall()]
+
+for tbl in tables:
+    print(f"TABLE: {tbl}")
+    cur.execute(f"PRAGMA table_info('{tbl}');")
+    for cid, name, ctype, notnull, dflt, pk in cur.fetchall():
+        flags = []
+        if notnull: flags.append("NOT NULL")
+        if pk:     flags.append("PK")
+        if dflt is not None: flags.append(f"DEFAULT={dflt}")
+        flagstr = f" [{' | '.join(flags)}]" if flags else ""
+        print(f"  - {name} ({ctype}){flagstr}")
+    print()
+
+
 <!DOCTYPE html>
 <html lang="en" data-brand="cpp">
 <head>
