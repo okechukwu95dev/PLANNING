@@ -10,45 +10,62 @@ python manage.py shell -c "from django.apps import apps; models = [m for m in ap
 """
 scripts/generate_erd_mermaid.py
 Usage: python scripts/generate_erd_mermaid.py > erd.mmd
-Outputs pure Mermaid classDiagram without code fences for direct copy/paste into mermaid editor.
+Outputs clean Mermaid classDiagram for DraftEntity models in "blueprints" app.
 """
-import os, django, re, sys
-from django.apps import apps
-from blueprints.abstract import DraftEntity
+import os, sys
+import re
+# insert project src/main on path
+dir_path = os.path.dirname(os.path.abspath(__file__))
+project_path = os.path.join(dir_path, 'src', 'main')
+sys.path.insert(0, project_path)
 
-# Setup Django
-env = 'src.main.config.settings_local'
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', env)
+import django
+from django.apps import apps
+from blueprints.models.abstract import DraftEntity
+
+# Setup Django settings
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings_local')
 django.setup()
 
-# Exclusion/filter patterns
-EXCLUDE_PATTERN = re.compile(r"^(Audit.*|.*Version|ExportRequest|ExportArtifact)$")
-FIELD_FILTER = {'id','version','create_timestamp','update_timestamp','effective_timestamp','termination_timestamp'}
+# Exclusion patterns and fields
+EXCLUDE_MODEL = re.compile(r"^(Audit.*|.*Version|ExportRequest|ExportArtifact)$")
+EXCLUDE_FIELD = {
+    'id','version',
+    'create_timestamp','update_timestamp',
+    'effective_timestamp','termination_timestamp',
+    'export'
+}
 
-# Gather DraftEntity models
+# Collect DraftEntity subclasses
 all_models = apps.get_app_config('blueprints').get_models()
-models = [m for m in all_models if issubclass(m, DraftEntity) and not EXCLUDE_PATTERN.match(m.__name__)]
+models = [m for m in all_models
+          if issubclass(m, DraftEntity)
+             and not EXCLUDE_MODEL.match(m.__name__)]
 
-# Emit Mermaid diagram
+# write Mermaid diagram
 w = sys.stdout.write
 w('classDiagram\n')
 
-# Emit classes with fields
+# emit classes
 for m in models:
-    w(f'    class {m.__name__} {{\n')
+    w('\n')
+    w(f'class {m.__name__} {{\n')
     for f in m._meta.fields:
-        if f.name in FIELD_FILTER: continue
-        fk = ' FK' if f.is_relation and f.many_to_one else ''
-        w(f'        {f.name}{fk}\n')
-    w('    }\n\n')
+        if f.name in EXCLUDE_FIELD:
+            continue
+        fk = ' <<FK>>' if f.is_relation and f.many_to_one else ''
+        w(f'  {f.name}{fk}\n')
+    w('}\n')
 
-# Emit relationships
+# emit relationships
+w('\n')
 for m in models:
     for f in m._meta.fields:
         if f.is_relation and f.many_to_one:
             tgt = f.related_model
             if tgt in models:
-                w(f'    {tgt.__name__} <|-- {m.__name__}\n')
+                w(f'{tgt.__name__} <|-- {m.__name__}\n')
+
 
 
 -----------------------------------------------------
