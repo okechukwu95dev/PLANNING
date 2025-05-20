@@ -1,6 +1,61 @@
 python manage.py graph_models blueprints --pydot --group-models --inheritance --exclude-models "Audit*,Version*,*Audit,*Version" --output-file-format png --theme django2018 --layout dot --arrow-shape normal --disable-abstract-fields --rankdir TB --hide-edge-labels --color-code-deletions --font-name "Arial" --font-size 10 --node-size 1.3 --edge-colors "#e00000" --node-shape box --node-style "rounded,filled,bold" --dot-file erd.dot --output erd.png --settings src.main.config.settings_local && python -c "import os; os.system('type erd.dot | findstr /i \"label=\"');"
 python manage.py shell -c "from django.apps import apps; models = [m for m in apps.get_models() if m.__module__.startswith('blueprints') and not any(x in m.__name__ for x in ['Audit', 'Version'])]; print('\n'.join([f'{m.__name__}: FKs→ {[f.name for f in m._meta.fields if f.is_relation]}' for m in models]))"
-pip install django-extensions pydot graphviz && echo "INSTALLED_APPS += ['django_extensions']" >> src/main/config/settings_local.py && python manage.py graph_models blueprints --pydot --group-models --inheritance --exclude-models "Audit*,Version*" --settings=src.main.config.settings_local -o erd.dot && dot -Tpng -Gnodesep=1.0 -Granksep=1.0 -Goverlap=false -Gsplines=ortho erd.dot -o erd.png
+#!/usr/bin/env python
+"""
+scripts/generate_erd.py
+Usage: python scripts/generate_erd.py
+Generates ERD PNG file for draft models in "blueprints" app, excluding audit/version tables.
+"""
+import os, django, re
+from django.apps import apps
+from graphviz import Digraph
+
+# configure Django settings module path
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'src.main.config.settings_local')
+django.setup()
+
+# adjust these to include/exclude patterns and field filters
+EXCLUDE_PATTERNS = [r"Audit.*", r".*Version"]
+FILTER_FIELDS = {'id', 'version', 'create_timestamp', 'update_timestamp', 'effective_timestamp', 'termination_timestamp'}
+
+# Graphviz settings
+dot = Digraph('ERD', format='png', engine='dot')
+dot.attr(rankdir='LR', splines='ortho', concentrate='true')
+
+# node and edge styling
+dot.attr('node', shape='plaintext')
+EDGE_ATTRS = {'arrowhead':'none', 'color':'#888888'}
+
+# collect models
+enabled_models = [m for m in apps.get_app_config('blueprints').get_models()
+                  if not any(re.match(p, m.__name__) for p in EXCLUDE_PATTERNS)]
+print('Included models:', [m.__name__ for m in enabled_models])
+
+# build table nodes
+def make_table(model):
+    fields = [f for f in model._meta.fields if f.name not in FILTER_FIELDS]
+    lines = ['<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0">']
+    # header\    lines.append(f'<TR><TD BGCOLOR="#155c93"><B>{model.__name__}</B></TD></TR>')
+    for f in fields:
+        pk = '<B>' if f.primary_key else ''
+        pk2 = '</B>' if f.primary_key else ''
+        fk = ' <I>FK</I>' if f.is_relation and f.many_to_one else ''
+        lines.append(f'<TR><TD ALIGN="LEFT" PORT="{f.name}">{pk}{f.name}{pk2}{fk}</TD></TR>')
+    lines.append('</TABLE>>')
+    dot.node(model.__name__, label=''.join(lines))
+
+for m in enabled_models:
+    make_table(m)
+
+# draw relationships
+for m in enabled_models:
+    for f in m._meta.fields:
+        if f.is_relation and f.many_to_one and f.related_model.__name__ in [x.__name__ for x in enabled_models]:
+            dot.edge(f.related_model.__name__, m.__name__, **EDGE_ATTRS)
+
+# render
+output = dot.render('draft_models_erd', cleanup=True)
+print('Generated:', output)
 
 -----------------------------------------------------
 
