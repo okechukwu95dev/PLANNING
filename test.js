@@ -1,63 +1,115 @@
 #!/usr/bin/env python
 """
-django_erd_generator.py - Generates ER diagram from Django models
+generate_erd_mermaid.py - Fixed version resolving import conflicts
+Outputs Mermaid classDiagram for models defined in draft.py only.
 """
 import os
 import sys
-import importlib.util
+import re
+from importlib import import_module
 
-# Setup paths
-script_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(script_dir, 'src', 'main'))
+def debug(msg): 
+    sys.stderr.write(f"DEBUG: {msg}\n")
 
-# Block conflicting modules (this is the key fix)
+# Add project src to path
+dir_path = os.path.dirname(os.path.abspath(__file__))
+project_src = os.path.join(dir_path, 'src', 'main')
+sys.path.insert(0, project_src)
+debug(f"sys.path inserted: {project_src}")
+
+# Block conflicting modules before Django setup
 sys.modules['blueprints.models.export'] = None
+debug("Blocked conflicting export module")
 
-# Set Django settings
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings_local')
-
-# Initialize Django
+# Configure Django
+env = 'config.settings_local'
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', env)
 import django
+from django.conf import settings
 django.setup()
+debug(f"Django setup complete")
 
-# Import DraftEntity
-from blueprints.models.abstract import DraftEntity
+# Import base DraftEntity
+try:
+    from blueprints.models.abstract import DraftEntity
+    debug("DraftEntity imported")
+except ImportError as e:
+    debug(f"Failed to import DraftEntity: {e}")
+    sys.exit(1)
 
-# Get models
+# Field filters
+EXCLUDE_FIELD = {
+    'id','version',
+    'create_timestamp','update_timestamp',
+    'effective_timestamp','termination_timestamp',
+    'export'
+}
+
+# Collect models
+from django.apps import apps
+debug(f"App configs: {[app.label for app in apps.get_app_configs()]}")
+
+try:
+    app_config = apps.get_app_config('blueprints')
+    debug(f"Found blueprints app config")
+except LookupError:
+    debug("Blueprints app not found")
+    sys.exit(1)
+
+all_models = app_config.get_models()
+debug(f"Total models: {len(all_models)}")
+debug(f"Model modules: {[m.__module__ for m in all_models[:5]]}")
+
 models = []
-for model in django.apps.apps.get_app_config('blueprints').get_models():
-    if not model.__module__.startswith('src.main.blueprints.models.draft'):
+for m in all_models:
+    module = m.__module__
+    debug(f"Checking model {m.__name__} from {module}")
+    
+    # Include only classes from draft.py module
+    if not (module.endswith('.draft') or '.models.draft' in module):
+        debug(f"Skipping {m.__name__}: not in draft module")
         continue
-    if 'Audit' in model.__name__ or 'Version' in model.__name__:
+    
+    # Skip Audit/Version models
+    if 'Audit' in m.__name__ or 'Version' in m.__name__:
+        debug(f"Skipping {m.__name__}: audit/version model")
         continue
-    if not issubclass(model, DraftEntity):
+        
+    # Must subclass DraftEntity
+    if not issubclass(m, DraftEntity):
+        debug(f"Skipping {m.__name__}: not a DraftEntity subclass")
         continue
-    models.append(model)
+        
+    models.append(m)
+    debug(f"Added model: {m.__name__}")
 
-print("Found models:", [m.__name__ for m in models])
+debug(f"Included models: {[m.__name__ for m in models]}")
 
-# Generate Mermaid
-print('```mermaid')
-print('classDiagram')
+if not models:
+    debug("No models found! Check paths and filters.")
+    sys.exit(1)
 
-# Add classes
-for model in models:
-    print(f'class {model.__name__} {{')
-    for field in model._meta.fields:
-        if field.name in ('id', 'version', 'create_timestamp', 'update_timestamp', 
-                          'effective_timestamp', 'termination_timestamp', 'export'):
-            continue
-        fk = ' <<FK>>' if field.is_relation else ''
-        print(f'  +{field.name}{fk}')
-    print('}')
-    print()
+# Output Mermaid
+w = sys.stdout.write
+w('```mermaid\n')
+w('classDiagram\n')
 
-# Add relationships
-for model in models:
-    for field in model._meta.fields:
-        if field.is_relation and hasattr(field, 'related_model'):
-            target = field.related_model
-            if target in models:
-                print(f'{target.__name__} <-- {model.__name__} : {field.name}')
+# Emit classes
+for m in models:
+    w(f"\nclass {m.__name__} {{\n")
+    for f in m._meta.fields:
+        if f.name in EXCLUDE_FIELD: continue
+        fk = ' <<FK>>' if getattr(f, 'many_to_one', False) else ''
+        w(f"  {f.name}{fk}\n")
+    w('}\n')
 
-print('```')
+# Emit relationships
+w('\n')
+for m in models:
+    for f in m._meta.fields:
+        if getattr(f, 'many_to_one', False):
+            tgt = f.related_model
+            if tgt in models:
+                w(f"{tgt.__name__} <-- {m.__name__}: {f.name}\n")
+
+w('```\n')
