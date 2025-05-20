@@ -1,88 +1,104 @@
 #!/usr/bin/env python
 """
-scripts/generate_erd_mermaid.py
-Usage: python scripts/generate_erd_mermaid.py > erd.mmd
-Outputs Mermaid classDiagram focusing only on draft models.
+generate_erd.py - Direct Draft.py Parser for ER Diagram Generation
 """
-import os, sys, re
+import os
+import sys
+import re
+import json
 
-# Setup debug
+# Setup paths
+script_dir = os.path.dirname(os.path.abspath(__file__))
+draft_py_path = os.path.join(script_dir, 'src', 'main', 'blueprints', 'models', 'draft.py')
+
 def debug(msg):
     sys.stderr.write(f"DEBUG: {msg}\n")
 
-# Add project path, prioritizing src/main
-dir_path = os.path.dirname(os.path.abspath(__file__))
-project_src = os.path.join(dir_path, 'src', 'main')
-sys.path.insert(0, project_src)
-debug(f"sys.path inserted: {project_src}")
-
-# Explicitly block problematic modules
-sys.modules['blueprints.models.export'] = None
-debug("Blocked blueprints.models.export module to prevent conflicts")
-
-# Django settings
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings_local')
-import django
-from django.conf import settings
-django.setup()
-
-# Import only the abstract model
-from blueprints.models.abstract import DraftEntity
-debug("Imported DraftEntity successfully")
-
-# Patterns and filters
-EXCLUDE_FIELD = {
-    'id', 'version',
-    'create_timestamp', 'update_timestamp',
-    'effective_timestamp', 'termination_timestamp',
-    'export'
-}
-
-# Focus only on draft module
-module_prefix = 'src.main.blueprints.models.draft'
-
-# Collect only draft models
-from django.apps import apps
-models = []
-for m in apps.get_app_config('blueprints').get_models():
-    debug(f"Checking model: {m.__name__} from {m.__module__}")
-    # Only include classes from draft.py
-    if not m.__module__.startswith(module_prefix):
-        continue
-    # Filter out audit/version models
-    if 'Audit' in m.__name__ or 'Version' in m.__name__:
-        continue
-    # Only include DraftEntity subclasses
-    if not issubclass(m, DraftEntity):
-        continue
-    models.append(m)
-
-debug(f"Models found: {[m.__name__ for m in models]}")
-if not models:
-    debug("WARNING: No models found! Check path and filters.")
-    sys.exit(1)
-
-# Generate Mermaid diagram
-w = sys.stdout.write
-w('```mermaid\n')
-w('classDiagram\n')
-
-# Class definitions
-for m in models:
-    w(f"class {m.__name__} {\n")
-    for f in m._meta.fields:
-        if f.name in EXCLUDE_FIELD: 
+def extract_models_from_file(file_path):
+    """Extract model definitions directly from draft.py file without importing"""
+    debug(f"Reading file: {file_path}")
+    
+    try:
+        with open(file_path, 'r') as f:
+            content = f.read()
+    except Exception as e:
+        debug(f"Error reading file: {e}")
+        return {}
+    
+    # Extract class definitions for DraftEntity models
+    class_pattern = r'class\s+(\w+)\(DraftEntity\):([^c]*?)(?=\n\s*class\s+|$)'
+    classes = re.findall(class_pattern, content, re.DOTALL)
+    
+    models = {}
+    for class_name, class_body in classes:
+        # Skip Audit and Version classes
+        if class_name.endswith(('Audit', 'Version')):
             continue
-        fk = ' <<FK>>' if getattr(f, 'many_to_one', False) else ''
-        w(f"  {f.name}{fk}\n")
-    w('}\n\n')
+        
+        debug(f"Found model: {class_name}")
+        
+        # Extract fields
+        field_pattern = r'(\w+)\s*=\s*models\.(\w+)Field\(([^)]*)\)'
+        fields = re.findall(field_pattern, class_body)
+        
+        # Extract foreign keys specifically
+        fk_pattern = r'(\w+)\s*=\s*models\.ForeignKey\((\w+)'
+        foreign_keys = re.findall(fk_pattern, class_body)
+        
+        models[class_name] = {
+            'fields': [{'name': name, 'type': field_type} for name, field_type, _ in fields],
+            'foreign_keys': [{'name': name, 'target': target} for name, target in foreign_keys]
+        }
+    
+    return models
 
-# Relationships
-for m in models:
-    for f in m._meta.fields:
-        if getattr(f, 'many_to_one', False):
-            tgt = f.related_model
-            if tgt in models:
-                w(f"{tgt.__name__} <-- {m.__name__}\n")
+def generate_mermaid(models):
+    """Generate mermaid diagram from extracted models"""
+    lines = ['```mermaid', 'classDiagram', '']
+    
+    # Class definitions
+    for model_name, model_data in models.items():
+        lines.append(f'class {model_name} {{')
+        
+        # Standard fields (excluding common ones)
+        exclude_fields = {'id', 'version', 'create_timestamp', 'update_timestamp',
+                          'effective_timestamp', 'termination_timestamp', 'export'}
+        
+        for field in model_data['fields']:
+            if field['name'] not in exclude_fields:
+                lines.append(f'  +{field["type"]} {field["name"]}')
+        
+        # Foreign keys
+        for fk in model_data['foreign_keys']:
+            if fk['name'] not in exclude_fields:
+                lines.append(f'  +ForeignKey {fk["name"]} <<FK>>')
+        
+        lines.append('}')
+        lines.append('')
+    
+    # Relationships
+    for model_name, model_data in models.items():
+        for fk in model_data['foreign_keys']:
+            target = fk['target']
+            if target in models:
+                lines.append(f'{target} <-- {model_name} : {fk["name"]}')
+    
+    lines.append('```')
+    return '\n'.join(lines)
 
-w('```\n')
+def main():
+    # Extract models from draft.py
+    models = extract_models_from_file(draft_py_path)
+    
+    if not models:
+        debug("No models found!")
+        return 1
+    
+    # Generate and print mermaid diagram
+    diagram = generate_mermaid(models)
+    print(diagram)
+    
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
