@@ -1,10 +1,7 @@
 #!/usr/bin/env python
 """
 gen.py - Enhanced draft.py parser for complete ER diagrams
-Parses DraftEntity classes from draft.py; generates GraphViz dot+PNG with types, PKs [PK], FKs [FK].
-Includes HTML-based tables with row lines, colored headers, and better visual organization.
-Usage: python gen.py
-Outputs: models.dot, models.png
+Parses DraftEntity models and generates diagram with curved edges, HTML tables, and proper styling.
 """
 import os
 import sys
@@ -73,12 +70,11 @@ if not models:
 dot = [
     'digraph ERD {',
     '  rankdir=LR;',
-    '  splines=ortho;',
+    '  splines=true;',  # Use curved lines
     '  nodesep=0.8;',
     '  ranksep=1.5;',
-    '  concentrate=true;',
     '  node [shape=none, margin=0, fontname="Arial", fontsize=10];',
-    '  edge [fontname="Arial", fontsize=9, arrowhead=normal, color="#4B83C3"];',
+    '  edge [fontname="Arial", fontsize=9, dir=back, arrowtail=empty, color="#4B83C3"];',
 ]
 
 # nodes with HTML tables
@@ -91,26 +87,23 @@ for m, flds in models.items():
     # Header row
     html_table += f'  <tr><td bgcolor="#336699" colspan="2"><font color="white"><b>{m}</b></font></td></tr>\n'
     
-    # Column headers
-    html_table += f'  <tr bgcolor="#E6EDF3"><td><b>Field</b></td><td><b>Type</b></td></tr>\n'
-    
-    # Field rows
+    # Fields
     for fname, ftype, pk, fk, tgt in flds:
         # Choose background color based on field type
         bg_color = '#FFF8DC' if pk else ('#F0F8FF' if fk else '')
         
         # Format cell content
-        field_name = f"<b>{fname}</b>" if pk else fname
-        if fk:
-            field_name = f"{field_name} [FK]"
+        field_display = fname
         if pk:
-            field_name = f"{field_name} [PK]"
+            field_display = f"<b>{fname}</b> [PK]"
+        elif fk:
+            field_display = f"{fname} [FK]"
             
         # Add row with port for FK relationships
         if fk:
-            html_table += f'  <tr bgcolor="{bg_color}"><td port="{fname}" align="left">{field_name}</td><td align="left">{ftype}</td></tr>\n'
+            html_table += f'  <tr bgcolor="{bg_color}"><td port="{fname}" align="left">{field_display}</td><td align="left">{ftype}</td></tr>\n'
         else:
-            html_table += f'  <tr bgcolor="{bg_color}"><td align="left">{field_name}</td><td align="left">{ftype}</td></tr>\n'
+            html_table += f'  <tr bgcolor="{bg_color}"><td align="left">{field_display}</td><td align="left">{ftype}</td></tr>\n'
     
     html_table += '</table>>'
     
@@ -123,7 +116,7 @@ dot.append('  // relationships')
 for m, flds in models.items():
     for fname, ftype, pk, fk, tgt in flds:
         if fk and tgt in models:
-            dot.append(f'  {m}:{fname} -> {tgt} [dir=back, arrowtail=crow, penwidth=1.2];')
+            dot.append(f'  {m}:{fname} -> {tgt} [color="#4B83C3"];')
 
 dot.append('}')
 
@@ -133,7 +126,7 @@ debug("Wrote models.dot")
 
 # render png
 try:
-    subprocess.run(['dot','-Tpng','-Gdpi=150','models.dot','-o','models.png'], check=True)
+    subprocess.run(['dot','-Tpng','-Gdpi=150','-o','models.png','models.dot'], check=True)
     debug("Generated models.png")
 except Exception as e:
     debug(f"PNG fail: {e}\nRun: dot -Tpng -Gdpi=150 models.dot -o models.png")
