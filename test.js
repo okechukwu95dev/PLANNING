@@ -1,4 +1,8 @@
-record = '{' + m + '|<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0"><TR><TD>' + '</TD></TR><TR><TD>'.join(lines) + '</TD></TR></TABLE>}'
+lines_html = []
+for fname, ftype, pk, fk, tgt in flds:
+    lbl = f"{fname}: {ftype}" + (" [PK]" if pk else "") + (" [FK]" if fk else "")
+    lines_html.append(f'<TR><TD>{lbl}</TD></TR>')
+record = f' {m} [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0"><TR><TD>{m}</TD></TR>{"".join(lines_html)}</TABLE>>];'
 
 
 #!/usr/bin/env python
