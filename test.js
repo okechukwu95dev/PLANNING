@@ -1,133 +1,106 @@
 #!/usr/bin/env python
 """
 generate_erd_mermaid.py - Fixed version handling export conflicts
+Usage: python generate_erd_mermaid.py > erd.mmd
+Generates Mermaid classDiagram for DraftEntity models in blueprints without export conflicts.
 """
 import os
 import sys
 import re
+import types
 
-def debug(msg): 
+# Debug helper
+def debug(msg):
     sys.stderr.write(f"DEBUG: {msg}\n")
 
-# Add project src to path
-dir_path = os.path.dirname(os.path.abspath(__file__))
-project_src = os.path.join(dir_path, 'src', 'main')
+# Setup project path
+base_dir = os.path.dirname(os.path.abspath(__file__))
+project_src = os.path.join(base_dir, 'src', 'main')
 sys.path.insert(0, project_src)
 debug(f"sys.path inserted: {project_src}")
 
-# Configure Django
-env = 'config.settings_local'
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', env)
+# Configure Django settings
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings_local')
 
-# Create a fake ExportRequest to prevent conflicts
-import types
-export_mod = types.ModuleType('blueprints.models.export')
-export_mod.ExportRequest = type('ExportRequest', (), {})
-sys.modules['blueprints.models.export'] = export_mod
-debug("Created fake ExportRequest to handle conflicts")
+debug("Creating fake export module to avoid import conflicts")
+# Fake export module
+fake_export = types.ModuleType('blueprints.models.export')
+fake_export.ExportRequest = type('ExportRequest', (), {})
+fake_export.ExportArtifact = type('ExportArtifact', (), {})
+sys.modules['blueprints.models.export'] = fake_export
 
+# Initialize Django
 import django
 from django.conf import settings
 django.setup()
-debug(f"Django setup complete")
+debug(f"Django INSTALLED_APPS: {settings.INSTALLED_APPS}")
 
 # Import DraftEntity
 try:
-    from src.main.blueprints.models.abstract import DraftEntity
-    debug("DraftEntity imported successfully")
-except ImportError:
-    try:
-        from blueprints.models.abstract import DraftEntity
-        debug("DraftEntity imported from alternative path")
-    except ImportError as e:
-        debug(f"Failed to import DraftEntity: {e}")
-        sys.exit(1)
+    from blueprints.models.abstract import DraftEntity
+    debug("DraftEntity imported")
+except ImportError as e:
+    debug(f"Failed to import DraftEntity: {e}")
+    sys.exit(1)
 
-# Field filters
+# Field exclusions
 EXCLUDE_FIELD = {
-    'id','version',
-    'create_timestamp','update_timestamp',
-    'effective_timestamp','termination_timestamp',
+    'id', 'version',
+    'create_timestamp', 'update_timestamp',
+    'effective_timestamp', 'termination_timestamp',
     'export'
 }
 
-# Collect models - try both app labels
+# Collect draft models
 from django.apps import apps
-debug(f"App configs: {[app.label for app in apps.get_app_configs()]}")
-
-# Try both app labels
-app_config = None
-for app_label in ['blueprints', 'src.main.blueprints']:
-    try:
-        app_config = apps.get_app_config(app_label)
-        debug(f"Found app config: {app_label}")
-        break
-    except LookupError:
-        continue
-
-if not app_config:
-    debug("Blueprint app not found")
-    sys.exit(1)
-
+app_label = 'blueprints'
+app_config = apps.get_app_config(app_label)
 all_models = app_config.get_models()
-debug(f"Total models: {len(all_models)}")
 
 models = []
 for m in all_models:
     module = m.__module__
-    debug(f"Checking model {m.__name__} from {module}")
-    
-    # Include only draft models
-    if not ('draft' in module.lower()):
-        debug(f"Skipping {m.__name__}: not in draft module")
+    # Only classes from draft.py
+    if not module.endswith('.draft'):
+        debug(f"Skipping {m.__name__}: module {module}")
         continue
-    
-    # Skip Audit/Version models
-    if 'Audit' in m.__name__ or 'Version' in m.__name__:
+    # Only DraftEntity subclasses
+    if not issubclass(m, DraftEntity):
+        debug(f"Skipping {m.__name__}: not subclass of DraftEntity")
+        continue
+    # Exclude Audit/Version
+    if re.search(r'(Audit|Version)$', m.__name__):
         debug(f"Skipping {m.__name__}: audit/version model")
         continue
-        
-    # Check DraftEntity subclass (with fallback)
-    try:
-        if not issubclass(m, DraftEntity):
-            debug(f"Skipping {m.__name__}: not a DraftEntity subclass")
-            continue
-    except TypeError:
-        # If comparison fails, check name convention
-        if not m.__name__.endswith(('Entity')):
-            debug(f"Skipping {m.__name__}: name doesn't suggest a DraftEntity")
-            continue
-        
     models.append(m)
-    debug(f"Added model: {m.__name__}")
-
-debug(f"Included models: {[m.__name__ for m in models]}")
+    debug(f"Including model: {m.__name__}")
 
 if not models:
-    debug("No models found! Check paths and filters.")
+    debug("No draft models found. Exiting.")
     sys.exit(1)
 
-# Output Mermaid
-w = sys.stdout.write
-w('```mermaid\n')
-w('classDiagram\n')
+# Output Mermaid diagram
+stdout = sys.stdout.write
+stdout('```mermaid\n')
+stdout('classDiagram\n')
 
 # Emit classes
 for m in models:
-    w(f"\nclass {m.__name__} {{\n")
+    stdout(f"\nclass {m.__name__} {{\n")
     for f in m._meta.fields:
-        if f.name in EXCLUDE_FIELD: continue
+        if f.name in EXCLUDE_FIELD:
+            continue
         fk = ' <<FK>>' if getattr(f, 'many_to_one', False) else ''
-        w(f"  {f.name}{fk}\n")
-    w('}\n')
+        stdout(f"  {f.name}{fk}\n")
+    stdout('}\n')
 
 # Emit relationships
-w('\n')
+stdout('\n')
 for m in models:
     for f in m._meta.fields:
         if getattr(f, 'many_to_one', False):
             tgt = f.related_model
             if tgt in models:
-                w(f"{tgt.__name__} <-- {m.__name__}: {f.name}\n")
+                stdout(f"{tgt.__name__} <-- {m.__name__}: {f.name}\n")
 
-w('```\n')
+stdout('```\n')
