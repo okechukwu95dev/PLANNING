@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """
 gen.py - Enhanced draft.py parser for complete ER diagrams
-Parses DraftEntity classes from draft.py; generates GraphViz dot+PNG with types, PKs [PK], FKs [FK], includes all fields.
-Skips Version/Audit classes; retains timestamps and id; excludes only 'version' field explicitly.
+Parses DraftEntity classes from draft.py; generates GraphViz dot+PNG with types, PKs [PK], FKs [FK].
+Includes HTML-based tables with row lines, colored headers, and better visual organization.
 Usage: python gen.py
 Outputs: models.dot, models.png
 """
@@ -34,6 +34,7 @@ with open(draft_path, 'r') as f:
 pattern = r'^class\s+(\w+)\s*\(\s*DraftEntity\s*\):(.*?)(?=^class\s+\w+\s*\(|\Z)'
 model_iter = re.finditer(pattern, content, re.MULTILINE | re.DOTALL)
 models = {}
+
 for m in model_iter:
     name, body = m.group(1), m.group(2)
     if re.search(r'(Audit|Version)$', name):
@@ -41,6 +42,7 @@ for m in model_iter:
         continue
     debug(f"Processing {name}")
     fields = []
+    
     # match both Field and ForeignKey
     fld_pattern = r'^\s*(\w+)\s*=\s*models\.(\w+)(Field|Key)\(([^)]*)\)'
     for fld in re.finditer(fld_pattern, body, re.MULTILINE):
@@ -48,54 +50,92 @@ for m in model_iter:
         ftype = base + suffix
         if fname == 'version':
             continue
+            
         debug(f"Found field {fname}: {ftype}")
         is_pk = 'primary_key=True' in params or base in ('Auto', 'BigAuto')
         is_fk = suffix == 'Key'
         target = None
+        
         if is_fk:
             tgt = re.search(r"ForeignKey\(\s*['\"]?([\w\.]+)['\"]?", fld.group(0))
             if tgt:
                 target = tgt.group(1).split('.')[-1]
+                
         fields.append((fname, ftype, is_pk, is_fk, target))
+        
     if fields:
         models[name] = fields
 
 if not models:
     debug("No models parsed"); sys.exit(1)
 
-# build dot
+# build dot with HTML-based tables
 dot = [
     'digraph ERD {',
     '  rankdir=LR;',
     '  splines=ortho;',
-    '  node [shape=record, fontname="Arial", fontsize=10];',
-    '  edge [fontname="Arial", fontsize=9, dir=back, arrowtail=empty];',
+    '  nodesep=0.8;',
+    '  ranksep=1.5;',
+    '  concentrate=true;',
+    '  node [shape=none, margin=0, fontname="Arial", fontsize=10];',
+    '  edge [fontname="Arial", fontsize=9, arrowhead=normal, color="#4B83C3"];',
 ]
-# nodes
+
+# nodes with HTML tables
 for m, flds in models.items():
     debug(f"Node {m}")
-    lines = []
+    
+    # Create HTML table
+    html_table = f'<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">\n'
+    
+    # Header row
+    html_table += f'  <tr><td bgcolor="#336699" colspan="2"><font color="white"><b>{m}</b></font></td></tr>\n'
+    
+    # Column headers
+    html_table += f'  <tr bgcolor="#E6EDF3"><td><b>Field</b></td><td><b>Type</b></td></tr>\n'
+    
+    # Field rows
     for fname, ftype, pk, fk, tgt in flds:
-        lbl = f"{fname}: {ftype}" + (" [PK]" if pk else "") + (" [FK]" if fk else "")
-        lines.append(lbl)
-    record = '{' + m + '|' + '\\l'.join(lines) + '\\l}'
-    dot.append(f'  {m} [label="{record}",style=filled,fillcolor="#E8F7FE",color="#4B83C3"];')
+        # Choose background color based on field type
+        bg_color = '#FFF8DC' if pk else ('#F0F8FF' if fk else '')
+        
+        # Format cell content
+        field_name = f"<b>{fname}</b>" if pk else fname
+        if fk:
+            field_name = f"{field_name} [FK]"
+        if pk:
+            field_name = f"{field_name} [PK]"
+            
+        # Add row with port for FK relationships
+        if fk:
+            html_table += f'  <tr bgcolor="{bg_color}"><td port="{fname}" align="left">{field_name}</td><td align="left">{ftype}</td></tr>\n'
+        else:
+            html_table += f'  <tr bgcolor="{bg_color}"><td align="left">{field_name}</td><td align="left">{ftype}</td></tr>\n'
+    
+    html_table += '</table>>'
+    
+    # Add node with HTML label
+    dot.append(f'  {m} [label={html_table}, style=""];')
+
 # edges
 dot.append('')
 dot.append('  // relationships')
 for m, flds in models.items():
     for fname, ftype, pk, fk, tgt in flds:
         if fk and tgt in models:
-            dot.append(f'  {m}:{fname} -> {tgt} [color="#4B83C3"];')
+            dot.append(f'  {m}:{fname} -> {tgt} [dir=back, arrowtail=crow, penwidth=1.2];')
 
 dot.append('}')
+
 # write dot
 with open('models.dot','w') as f: f.write('\n'.join(dot))
 debug("Wrote models.dot")
+
 # render png
 try:
-    subprocess.run(['dot','-Tpng','models.dot','-o','models.png'], check=True)
+    subprocess.run(['dot','-Tpng','-Gdpi=150','models.dot','-o','models.png'], check=True)
     debug("Generated models.png")
 except Exception as e:
-    debug(f"PNG fail: {e}\nRun: dot -Tpng models.dot -o models.png")
+    debug(f"PNG fail: {e}\nRun: dot -Tpng -Gdpi=150 models.dot -o models.png")
+
 print("Done: models.dot, models.png")
