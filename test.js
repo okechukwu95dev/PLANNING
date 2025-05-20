@@ -1,3 +1,6 @@
+record = '{' + m + '|<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0"><TR><TD>' + '</TD></TR><TR><TD>'.join(lines) + '</TD></TR></TABLE>}'
+
+
 #!/usr/bin/env python
 """
 gen.py - Enhanced draft.py parser using your original working code with HTML tables
