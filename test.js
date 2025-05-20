@@ -1,12 +1,10 @@
 #!/usr/bin/env python
 """
-generate_erd_mermaid.py - Fixed version resolving import conflicts
-Outputs Mermaid classDiagram for models defined in draft.py only.
+generate_erd_mermaid.py - Fixed version handling export conflicts
 """
 import os
 import sys
 import re
-from importlib import import_module
 
 def debug(msg): 
     sys.stderr.write(f"DEBUG: {msg}\n")
@@ -17,25 +15,33 @@ project_src = os.path.join(dir_path, 'src', 'main')
 sys.path.insert(0, project_src)
 debug(f"sys.path inserted: {project_src}")
 
-# Block conflicting modules before Django setup
-sys.modules['blueprints.models.export'] = None
-debug("Blocked conflicting export module")
-
 # Configure Django
 env = 'config.settings_local'
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', env)
+
+# Create a fake ExportRequest to prevent conflicts
+import types
+export_mod = types.ModuleType('blueprints.models.export')
+export_mod.ExportRequest = type('ExportRequest', (), {})
+sys.modules['blueprints.models.export'] = export_mod
+debug("Created fake ExportRequest to handle conflicts")
+
 import django
 from django.conf import settings
 django.setup()
 debug(f"Django setup complete")
 
-# Import base DraftEntity
+# Import DraftEntity
 try:
-    from blueprints.models.abstract import DraftEntity
-    debug("DraftEntity imported")
-except ImportError as e:
-    debug(f"Failed to import DraftEntity: {e}")
-    sys.exit(1)
+    from src.main.blueprints.models.abstract import DraftEntity
+    debug("DraftEntity imported successfully")
+except ImportError:
+    try:
+        from blueprints.models.abstract import DraftEntity
+        debug("DraftEntity imported from alternative path")
+    except ImportError as e:
+        debug(f"Failed to import DraftEntity: {e}")
+        sys.exit(1)
 
 # Field filters
 EXCLUDE_FIELD = {
@@ -45,28 +51,34 @@ EXCLUDE_FIELD = {
     'export'
 }
 
-# Collect models
+# Collect models - try both app labels
 from django.apps import apps
 debug(f"App configs: {[app.label for app in apps.get_app_configs()]}")
 
-try:
-    app_config = apps.get_app_config('blueprints')
-    debug(f"Found blueprints app config")
-except LookupError:
-    debug("Blueprints app not found")
+# Try both app labels
+app_config = None
+for app_label in ['blueprints', 'src.main.blueprints']:
+    try:
+        app_config = apps.get_app_config(app_label)
+        debug(f"Found app config: {app_label}")
+        break
+    except LookupError:
+        continue
+
+if not app_config:
+    debug("Blueprint app not found")
     sys.exit(1)
 
 all_models = app_config.get_models()
 debug(f"Total models: {len(all_models)}")
-debug(f"Model modules: {[m.__module__ for m in all_models[:5]]}")
 
 models = []
 for m in all_models:
     module = m.__module__
     debug(f"Checking model {m.__name__} from {module}")
     
-    # Include only classes from draft.py module
-    if not (module.endswith('.draft') or '.models.draft' in module):
+    # Include only draft models
+    if not ('draft' in module.lower()):
         debug(f"Skipping {m.__name__}: not in draft module")
         continue
     
@@ -75,10 +87,16 @@ for m in all_models:
         debug(f"Skipping {m.__name__}: audit/version model")
         continue
         
-    # Must subclass DraftEntity
-    if not issubclass(m, DraftEntity):
-        debug(f"Skipping {m.__name__}: not a DraftEntity subclass")
-        continue
+    # Check DraftEntity subclass (with fallback)
+    try:
+        if not issubclass(m, DraftEntity):
+            debug(f"Skipping {m.__name__}: not a DraftEntity subclass")
+            continue
+    except TypeError:
+        # If comparison fails, check name convention
+        if not m.__name__.endswith(('Entity')):
+            debug(f"Skipping {m.__name__}: name doesn't suggest a DraftEntity")
+            continue
         
     models.append(m)
     debug(f"Added model: {m.__name__}")
