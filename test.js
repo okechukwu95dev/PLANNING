@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-gen.py - Draft.py parser that generates diagrams in your preferred style
+gen.py - Enhanced draft.py parser using your original working code with HTML tables
 """
 import os
 import sys
@@ -24,6 +24,7 @@ debug(f"Using draft.py at {draft_path}")
 # read content
 with open(draft_path, 'r') as f:
     content = f.read()
+    debug(f"Read {len(content)} bytes")
 
 # find DraftEntity classes
 pattern = r'^class\s+(\w+)\s*\(\s*DraftEntity\s*\):(.*?)(?=^class\s+\w+\s*\(|\Z)'
@@ -33,11 +34,12 @@ models = {}
 for m in model_iter:
     name, body = m.group(1), m.group(2)
     if re.search(r'(Audit|Version)$', name):
+        debug(f"Skipping {name}")
         continue
-    
+    debug(f"Processing {name}")
     fields = []
     
-    # Find fields
+    # match both Field and ForeignKey
     fld_pattern = r'^\s*(\w+)\s*=\s*models\.(\w+)(Field|Key)\(([^)]*)\)'
     for fld in re.finditer(fld_pattern, body, re.MULTILINE):
         fname, base, suffix, params = fld.group(1), fld.group(2), fld.group(3), fld.group(4)
@@ -45,6 +47,7 @@ for m in model_iter:
         if fname == 'version':
             continue
             
+        debug(f"Found field {fname}: {ftype}")
         is_pk = 'primary_key=True' in params or base in ('Auto', 'BigAuto')
         is_fk = suffix == 'Key'
         target = None
@@ -59,63 +62,72 @@ for m in model_iter:
     if fields:
         models[name] = fields
 
-# Generate DOT file
+if not models:
+    debug("No models parsed"); sys.exit(1)
+
+# build dot
 dot = [
-    'digraph ER {',
-    '  graph [rankdir=TB, overlap=false, splines=true, concentrate=true];',
-    '  node [fontsize=10, fontname="Arial", shape=none];',
-    '  edge [fontsize=9, fontname="Arial", color="#336699", arrowsize=0.8];',
-    ''
+    'digraph ERD {',
+    '  rankdir=LR;',
+    '  splines=true;',
+    '  node [shape=none, fontname="Arial", fontsize=10];',
+    '  edge [fontname="Arial", fontsize=9, dir=back, arrowtail=empty, color="#4B83C3"];',
 ]
 
-# Generate HTML tables for nodes
-for model_name, fields in models.items():
-    # Create table header
-    table = f'<<table border="0" cellborder="1" cellspacing="0" cellpadding="3">'
-    table += f'<tr><td bgcolor="#336699" colspan="2"><font color="white"><b>{model_name}</b></font></td></tr>'
+# nodes with HTML tables
+for m, flds in models.items():
+    debug(f"Node {m}")
     
-    # Add fields
-    for field_name, field_type, is_pk, is_fk, target in fields:
-        pk_tag = "[PK]" if is_pk else ""
-        fk_tag = "[FK]" if is_fk else ""
+    # Create HTML table
+    html_table = f'<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">'
+    
+    # Header row
+    html_table += f'<tr><td bgcolor="#336699" colspan="2"><font color="white"><b>{m}</b></font></td></tr>'
+    
+    # Field rows
+    for fname, ftype, pk, fk, tgt in flds:
+        # Background color for PKs
+        bg_color = '#e6f2ff' if pk else ''
         
-        # Format name with tags
-        display_name = f"{field_name} {pk_tag}{fk_tag}".strip()
-        port_attr = f'port="{field_name}"' if is_fk else ""
-        bgcolor = "#e6f2ff" if is_pk else ""
+        # Add PK/FK labels
+        display_name = fname
+        if pk:
+            display_name += " [PK]"
+        if fk:
+            display_name += " [FK]"
+            
+        # Add port attribute for relationships
+        port_attr = f'port="{fname}"' if fk else ''
         
-        table += f'<tr bgcolor="{bgcolor}"><td {port_attr} align="left">{display_name}</td><td align="left">{field_type}</td></tr>'
+        # Add table row
+        html_table += f'<tr bgcolor="{bg_color}"><td {port_attr} align="left">{display_name}</td><td align="left">{ftype}</td></tr>'
     
-    table += '</table>>'
+    # Close table
+    html_table += '</table>>'
     
-    # Add node with HTML label
-    dot.append(f'  "{model_name}" [label={table}, fillcolor="#f5faff", style="filled"];')
+    # Add node to dot file
+    dot.append(f'  {m} [label={html_table}];')
 
-# Add blank line before edges
+# edges
 dot.append('')
+dot.append('  // relationships')
+for m, flds in models.items():
+    for fname, ftype, pk, fk, tgt in flds:
+        if fk and tgt in models:
+            dot.append(f'  {m}:{fname} -> {tgt} [color="#4B83C3"];')
 
-# Add edges for relationships
-for source, fields in models.items():
-    for field_name, field_type, is_pk, is_fk, target in fields:
-        if is_fk and target in models:
-            dot.append(f'  "{source}":"{field_name}" -> "{target}" [dir=both, arrowtail=none, arrowhead=normal];')
-
-# Close graph
 dot.append('}')
 
-# Write dot file
-with open('models.dot', 'w') as f:
+# write dot
+with open('models.dot','w') as f:
     f.write('\n'.join(dot))
+debug("Wrote models.dot")
 
-# Generate PNG
+# render png
 try:
-    subprocess.run(['dot', '-Tpng', '-Gdpi=150', '-o', 'models.png', 'models.dot'], check=True)
+    subprocess.run(['dot','-Tpng','-o','models.png','models.dot'], check=True)
     debug("Generated models.png")
-    
-    # Also try to generate SVG for better quality
-    subprocess.run(['dot', '-Tsvg', '-o', 'models.svg', 'models.dot'], check=True)
-    debug("Generated models.svg")
 except Exception as e:
-    debug(f"Error generating image: {e}")
+    debug(f"PNG fail: {e}\nRun: dot -Tpng models.dot -o models.png")
 
-print("Done! Generated models.dot and models.png")
+print("Done: models.dot, models.png")
