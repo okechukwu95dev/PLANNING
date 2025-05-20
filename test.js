@@ -1,49 +1,17 @@
 #!/usr/bin/env python
 """
-generate_erd_mermaid.py - Fixed version handling export conflicts
-Usage: python generate_erd_mermaid.py > erd.mmd
-Generates Mermaid classDiagram for DraftEntity models in blueprints without export conflicts.
+gen.py - Direct file parser for draft.py models
 """
 import os
 import sys
 import re
-import types
 
-# Debug helper
-def debug(msg):
-    sys.stderr.write(f"DEBUG: {msg}\n")
+# Output Mermaid
+w = sys.stdout.write
+w("```mermaid\n")
+w("classDiagram\n")
 
-# Setup project path
-base_dir = os.path.dirname(os.path.abspath(__file__))
-project_src = os.path.join(base_dir, 'src', 'main')
-sys.path.insert(0, project_src)
-debug(f"sys.path inserted: {project_src}")
-
-# Configure Django settings
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings_local')
-
-debug("Creating fake export module to avoid import conflicts")
-# Fake export module
-fake_export = types.ModuleType('blueprints.models.export')
-fake_export.ExportRequest = type('ExportRequest', (), {})
-fake_export.ExportArtifact = type('ExportArtifact', (), {})
-sys.modules['blueprints.models.export'] = fake_export
-
-# Initialize Django
-import django
-from django.conf import settings
-django.setup()
-debug(f"Django INSTALLED_APPS: {settings.INSTALLED_APPS}")
-
-# Import DraftEntity
-try:
-    from blueprints.models.abstract import DraftEntity
-    debug("DraftEntity imported")
-except ImportError as e:
-    debug(f"Failed to import DraftEntity: {e}")
-    sys.exit(1)
-
-# Field exclusions
+# Exclude field names
 EXCLUDE_FIELD = {
     'id', 'version',
     'create_timestamp', 'update_timestamp',
@@ -51,56 +19,73 @@ EXCLUDE_FIELD = {
     'export'
 }
 
-# Collect draft models
-from django.apps import apps
-app_label = 'blueprints'
-app_config = apps.get_app_config(app_label)
-all_models = app_config.get_models()
+# Find models directly from file
+draft_py_path = os.path.join('src', 'main', 'blueprints', 'models', 'draft.py')
 
-models = []
-for m in all_models:
-    module = m.__module__
-    # Only classes from draft.py
-    if not module.endswith('.draft'):
-        debug(f"Skipping {m.__name__}: module {module}")
-        continue
-    # Only DraftEntity subclasses
-    if not issubclass(m, DraftEntity):
-        debug(f"Skipping {m.__name__}: not subclass of DraftEntity")
-        continue
-    # Exclude Audit/Version
-    if re.search(r'(Audit|Version)$', m.__name__):
-        debug(f"Skipping {m.__name__}: audit/version model")
-        continue
-    models.append(m)
-    debug(f"Including model: {m.__name__}")
+# Read the file
+try:
+    with open(draft_py_path, 'r') as f:
+        content = f.read()
+except FileNotFoundError:
+    draft_py_path = os.path.join('blueprints-api', 'src', 'main', 'blueprints', 'models', 'draft.py')
+    with open(draft_py_path, 'r') as f:
+        content = f.read()
 
-if not models:
-    debug("No draft models found. Exiting.")
-    sys.exit(1)
+# Parse class definitions
+class_pattern = r'class\s+(\w+)\(DraftEntity\):(.*?)(?=class\s+\w+\(|$)'
+models = {}
 
-# Output Mermaid diagram
-stdout = sys.stdout.write
-stdout('```mermaid\n')
-stdout('classDiagram\n')
+for match in re.finditer(class_pattern, content, re.DOTALL):
+    class_name = match.group(1)
+    class_body = match.group(2)
+    
+    # Skip Audit and Version classes
+    if 'Audit' in class_name or 'Version' in class_name:
+        continue
+    
+    # Extract fields
+    models[class_name] = {
+        'fields': [],
+        'fks': []
+    }
+    
+    # Regular fields
+    field_pattern = r'(\w+)\s*=\s*models\.(\w+)Field\('
+    for field_match in re.finditer(field_pattern, class_body):
+        field_name = field_match.group(1)
+        field_type = field_match.group(2)
+        
+        if field_name not in EXCLUDE_FIELD:
+            models[class_name]['fields'].append((field_name, field_type))
+    
+    # Foreign keys
+    fk_pattern = r'(\w+)\s*=\s*models\.ForeignKey\((\w+)'
+    for fk_match in re.finditer(fk_pattern, class_body):
+        field_name = fk_match.group(1)
+        target_model = fk_match.group(2)
+        
+        if field_name not in EXCLUDE_FIELD:
+            models[class_name]['fks'].append((field_name, target_model))
 
 # Emit classes
-for m in models:
-    stdout(f"\nclass {m.__name__} {{\n")
-    for f in m._meta.fields:
-        if f.name in EXCLUDE_FIELD:
-            continue
-        fk = ' <<FK>>' if getattr(f, 'many_to_one', False) else ''
-        stdout(f"  {f.name}{fk}\n")
-    stdout('}\n')
+for class_name, data in models.items():
+    w(f"\nclass {class_name} {{\n")
+    
+    # Regular fields
+    for field_name, field_type in data['fields']:
+        w(f"  +{field_type} {field_name}\n")
+    
+    # Foreign keys
+    for field_name, _ in data['fks']:
+        w(f"  +ForeignKey {field_name} <<FK>>\n")
+    
+    w("}\n")
 
 # Emit relationships
-stdout('\n')
-for m in models:
-    for f in m._meta.fields:
-        if getattr(f, 'many_to_one', False):
-            tgt = f.related_model
-            if tgt in models:
-                stdout(f"{tgt.__name__} <-- {m.__name__}: {f.name}\n")
+w("\n")
+for class_name, data in models.items():
+    for field_name, target_model in data['fks']:
+        if target_model in models:
+            w(f"{target_model} <-- {class_name} : {field_name}\n")
 
-stdout('```\n')
+w("```\n")
