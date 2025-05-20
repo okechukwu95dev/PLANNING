@@ -1,39 +1,55 @@
 python manage.py graph_models blueprints --pydot --group-models --inheritance --exclude-models "Audit*,Version*,*Audit,*Version" --output-file-format png --theme django2018 --layout dot --arrow-shape normal --disable-abstract-fields --rankdir TB --hide-edge-labels --color-code-deletions --font-name "Arial" --font-size 10 --node-size 1.3 --edge-colors "#e00000" --node-shape box --node-style "rounded,filled,bold" --dot-file erd.dot --output erd.png --settings src.main.config.settings_local && python -c "import os; os.system('type erd.dot | findstr /i \"label=\"');"
 python manage.py shell -c "from django.apps import apps; models = [m for m in apps.get_models() if m.__module__.startswith('blueprints') and not any(x in m.__name__ for x in ['Audit', 'Version'])]; print('\n'.join([f'{m.__name__}: FKs→ {[f.name for f in m._meta.fields if f.is_relation]}' for m in models]))"
+
+-----------------------------------------------------
+
+
+
+    
 #!/usr/bin/env python
 """
 scripts/generate_erd_mermaid.py
 Usage: python scripts/generate_erd_mermaid.py > erd.mmd
-Generates Mermaid classDiagram ERD for draft models in "blueprints" app, excluding audit/version models.
+Outputs pure Mermaid classDiagram without code fences for direct copy/paste into mermaid editor.
 """
 import os, django, re, sys
 from django.apps import apps
+from blueprints.abstract import DraftEntity
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'src.main.config.settings_local')
+# Setup Django
+env = 'src.main.config.settings_local'
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', env)
 django.setup()
 
-EXCLUDE_PATTERN = re.compile(r"^(Audit.*|.*Version)$")
+# Exclusion/filter patterns
+EXCLUDE_PATTERN = re.compile(r"^(Audit.*|.*Version|ExportRequest|ExportArtifact)$")
 FIELD_FILTER = {'id','version','create_timestamp','update_timestamp','effective_timestamp','termination_timestamp'}
 
-sys.stdout.write('```mermaid\nclassDiagram\n')
-for model in apps.get_app_config('blueprints').get_models():
-    name = model.__name__
-    if EXCLUDE_PATTERN.match(name): continue
-    sys.stdout.write(f'    class {name} {{\n')
-    for f in model._meta.fields:
+# Gather DraftEntity models
+all_models = apps.get_app_config('blueprints').get_models()
+models = [m for m in all_models if issubclass(m, DraftEntity) and not EXCLUDE_PATTERN.match(m.__name__)]
+
+# Emit Mermaid diagram
+w = sys.stdout.write
+w('classDiagram\n')
+
+# Emit classes with fields
+for m in models:
+    w(f'    class {m.__name__} {{\n')
+    for f in m._meta.fields:
         if f.name in FIELD_FILTER: continue
-        flag = ' [FK]' if f.is_relation and f.many_to_one else ''
-        sys.stdout.write(f'        {f.name}{flag}\n')
-    sys.stdout.write('    }\n\n')
-for model in apps.get_app_config('blueprints').get_models():
-    src = model.__name__
-    if EXCLUDE_PATTERN.match(src): continue
-    for f in model._meta.fields:
+        fk = ' FK' if f.is_relation and f.many_to_one else ''
+        w(f'        {f.name}{fk}\n')
+    w('    }\n\n')
+
+# Emit relationships
+for m in models:
+    for f in m._meta.fields:
         if f.is_relation and f.many_to_one:
-            tgt = f.related_model.__name__
-            if EXCLUDE_PATTERN.match(tgt): continue
-            sys.stdout.write(f'    {tgt} <|-- {src}\n')
-sys.stdout.write('```\n')
+            tgt = f.related_model
+            if tgt in models:
+                w(f'    {tgt.__name__} <|-- {m.__name__}\n')
+
 
 -----------------------------------------------------
 
