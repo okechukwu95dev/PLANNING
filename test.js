@@ -1,3 +1,9 @@
+python manage.py graph_models blueprints --pydot --group-models --inheritance --exclude-models "Audit*,Version*,*Audit,*Version" --output-file-format png --theme django2018 --layout dot --arrow-shape normal --disable-abstract-fields --rankdir TB --hide-edge-labels --color-code-deletions --font-name "Arial" --font-size 10 --node-size 1.3 --edge-colors "#e00000" --node-shape box --node-style "rounded,filled,bold" --dot-file erd.dot --output erd.png --settings src.main.config.settings_local && python -c "import os; os.system('type erd.dot | findstr /i \"label=\"');"
+python manage.py shell -c "from django.apps import apps; models = [m for m in apps.get_models() if m.__module__.startswith('blueprints') and not any(x in m.__name__ for x in ['Audit', 'Version'])]; print('\n'.join([f'{m.__name__}: FKs→ {[f.name for f in m._meta.fields if f.is_relation]}' for m in models]))"
+pip install django-extensions pydot graphviz && echo "INSTALLED_APPS += ['django_extensions']" >> src/main/config/settings_local.py && python manage.py graph_models blueprints --pydot --group-models --inheritance --exclude-models "Audit*,Version*" --settings=src.main.config.settings_local -o erd.dot && dot -Tpng -Gnodesep=1.0 -Granksep=1.0 -Goverlap=false -Gsplines=ortho erd.dot -o erd.png
+
+-----------------------------------------------------
+
 python manage.py graph_models blueprints --pydot --group-models --inheritance --exclude-models "Audit*,Version*" -o erd.dot --settings src.main.config.settings_local
 
 python manage.py graph_models blueprints --dot --inheritance --exclude-models "Audit*,Version*" > erd.dot --settings src.main.config.settings_local
