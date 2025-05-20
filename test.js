@@ -1,13 +1,10 @@
-lines_html = []
-for fname, ftype, pk, fk, tgt in flds:
-    lbl = f"{fname}: {ftype}" + (" [PK]" if pk else "") + (" [FK]" if fk else "")
-    lines_html.append(f'<TR><TD>{lbl}</TD></TR>')
-record = f' {m} [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0"><TR><TD>{m}</TD></TR>{"".join(lines_html)}</TABLE>>];'
-
-
 #!/usr/bin/env python
 """
-gen.py - Enhanced draft.py parser using your original working code with HTML tables
+gen.py - Enhanced draft.py parser for clean ER diagrams
+Parses DraftEntity classes from draft.py; generates GraphViz dot+PNG with HTML-table labels.
+Skips Version/Audit classes; retains timestamps and id; excludes only 'version' field explicitly.
+Usage: python gen.py
+Outputs: models.dot, models.png
 """
 import os
 import sys
@@ -20,7 +17,7 @@ def debug(msg):
 # locate draft.py
 paths = [
     os.path.join('src','main','blueprints','models','draft.py'),
-    os.path.join('blueprints-api','src','main','blueprints','models','draft.py')
+    os.path.join('blueprints-api','src','main','blueprints','models','draft.py'),
 ]
 draft_path = next((p for p in paths if os.path.exists(p)), None)
 if not draft_path:
@@ -31,97 +28,69 @@ debug(f"Using draft.py at {draft_path}")
 # read content
 with open(draft_path, 'r') as f:
     content = f.read()
-    debug(f"Read {len(content)} bytes")
+debug(f"Read {len(content)} bytes")
 
-# find DraftEntity classes
-pattern = r'^class\s+(\w+)\s*\(\s*DraftEntity\s*\):(.*?)(?=^class\s+\w+\s*\(|\Z)'
+# parse models
+pattern = r'^class\s+(\w+)\s*\(\s*DraftEntity\s*\):(.+?)(?=^class\s+\w+\s*\(|\Z)'
 model_iter = re.finditer(pattern, content, re.MULTILINE | re.DOTALL)
+fld_pattern = r'^\s+(\w+)\s*=\s*models\.(\w+)(Field|Key)\(([^)]*)\)'
 models = {}
-
 for m in model_iter:
     name, body = m.group(1), m.group(2)
-    if re.search(r'(Audit|Version)$', name):
+    if name.endswith(('Audit','Version')):
         debug(f"Skipping {name}")
         continue
     debug(f"Processing {name}")
     fields = []
-    
-    # match both Field and ForeignKey
-    fld_pattern = r'^\s*(\w+)\s*=\s*models\.(\w+)(Field|Key)\(([^)]*)\)'
     for fld in re.finditer(fld_pattern, body, re.MULTILINE):
         fname, base, suffix, params = fld.group(1), fld.group(2), fld.group(3), fld.group(4)
-        ftype = base + suffix
         if fname == 'version':
             continue
-            
-        debug(f"Found field {fname}: {ftype}")
-        is_pk = 'primary_key=True' in params or base in ('Auto', 'BigAuto')
-        is_fk = suffix == 'Key'
+        ftype = base + suffix
+        is_pk = 'primary_key=True' in params or base in ('Auto','BigAuto')
+        is_fk = (suffix == 'Key')
         target = None
-        
         if is_fk:
             tgt = re.search(r"ForeignKey\(\s*['\"]?([\w\.]+)['\"]?", fld.group(0))
             if tgt:
                 target = tgt.group(1).split('.')[-1]
-                
         fields.append((fname, ftype, is_pk, is_fk, target))
-        
     if fields:
         models[name] = fields
 
 if not models:
-    debug("No models parsed"); sys.exit(1)
+    debug("No models parsed")
+    sys.exit(1)
 
 # build dot
 dot = [
     'digraph ERD {',
-    '  rankdir=LR;',
-    '  splines=true;',
-    '  node [shape=none, fontname="Arial", fontsize=10];',
-    '  edge [fontname="Arial", fontsize=9, dir=back, arrowtail=empty, color="#4B83C3"];',
+    '  graph [splines=ortho, overlap=false, concentrate=true, rankdir=LR, nodesep=1.0, ranksep=2.0];',
+    '  node [shape=plaintext, fontname="Arial", fontsize=10];',
+    '  edge [color="#4B83C3", dir=back, arrowtail=empty];',
 ]
 
-# nodes with HTML tables
+# nodes as HTML tables
 for m, flds in models.items():
     debug(f"Node {m}")
-    
-    # Create HTML table
-    html_table = f'<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">'
-    
-    # Header row
-    html_table += f'<tr><td bgcolor="#336699" colspan="2"><font color="white"><b>{m}</b></font></td></tr>'
-    
-    # Field rows
-    for fname, ftype, pk, fk, tgt in flds:
-        # Background color for PKs
-        bg_color = '#e6f2ff' if pk else ''
-        
-        # Add PK/FK labels
-        display_name = fname
-        if pk:
-            display_name += " [PK]"
-        if fk:
-            display_name += " [FK]"
-            
-        # Add port attribute for relationships
-        port_attr = f'port="{fname}"' if fk else ''
-        
-        # Add table row
-        html_table += f'<tr bgcolor="{bg_color}"><td {port_attr} align="left">{display_name}</td><td align="left">{ftype}</td></tr>'
-    
-    # Close table
-    html_table += '</table>>'
-    
-    # Add node to dot file
-    dot.append(f'  {m} [label={html_table}];')
+    html = ['<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">']
+    html.append(f'  <TR><TD BGCOLOR="#D0E4F7" COLSPAN="2"><B>{m}</B></TD></TR>')
+    for fname, ftype, pk, fk, _ in flds:
+        icons = ''
+        if pk: icons += '<FONT POINT-SIZE="8" COLOR="#555555">PK</FONT>'
+        if fk: icons += '<FONT POINT-SIZE="8" COLOR="#555555">FK</FONT>'
+        html.append(f'  <TR><TD ALIGN="LEFT">{fname}: {ftype}</TD><TD ALIGN="CENTER">{icons}</TD></TR>')
+    html.append('</TABLE>>')
+    label = '\n'.join(html)
+    dot.append(f'  {m} [label={label}];')
 
 # edges
 dot.append('')
 dot.append('  // relationships')
 for m, flds in models.items():
-    for fname, ftype, pk, fk, tgt in flds:
-        if fk and tgt in models:
-            dot.append(f'  {m}:{fname} -> {tgt} [color="#4B83C3"];')
+    for _, _, _, is_fk, tgt in flds:
+        if is_fk and tgt in models:
+            dot.append(f'  {m} -> {tgt};')
 
 dot.append('}')
 
@@ -132,7 +101,7 @@ debug("Wrote models.dot")
 
 # render png
 try:
-    subprocess.run(['dot','-Tpng','-o','models.png','models.dot'], check=True)
+    subprocess.run(['dot','-Tpng','models.dot','-o','models.png'], check=True)
     debug("Generated models.png")
 except Exception as e:
     debug(f"PNG fail: {e}\nRun: dot -Tpng models.dot -o models.png")
