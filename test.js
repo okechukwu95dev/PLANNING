@@ -1,3 +1,76 @@
+# Data sources to retrieve secrets
+data "aws_secretsmanager_secret_version" "jks_file" {
+ secret_id = "/application/platform-data/kafka-lambda/pks-msk-jks"
+}
+
+data "aws_secretsmanager_secret_version" "p12_file" {
+ secret_id = "/application/platform-data/kafka-lambda/pks-msk-p12"
+}
+
+data "aws_secretsmanager_secret_version" "password" {
+ secret_id = "/application/platform-data/kafka-lambda/pks-msk-password"
+}
+
+# Write files locally
+resource "local_file" "jks_file" {
+ content_base64 = data.aws_secretsmanager_secret_version.jks_file.secret_binary
+ filename       = "./keystore.jks"
+}
+
+resource "local_file" "p12_file" {
+ content_base64 = data.aws_secretsmanager_secret_version.p12_file.secret_binary
+ filename       = "./keystore.p12"
+}
+
+resource "local_file" "password_file" {
+ content  = data.aws_secretsmanager_secret_version.password.secret_string
+ filename = "./keystore_password.txt"
+}
+
+# Optional: Outputs for verification
+output "jks_retrieved" {
+ value = "JKS file saved to ./keystore.jks"
+}
+
+output "p12_retrieved" {
+ value = "P12 file saved to ./keystore.p12"
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 resource "local_file" "jks_file" {
   content_base64 = data.aws_secretsmanager_secret_version.jks_file.secret_binary
   filename       = "./keystore.jks"
